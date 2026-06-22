@@ -1,0 +1,10 @@
+<library path="rascl_hardware_interface">
+  <class
+    name="rascl_hardware_interface/RasclHardwareInterface"
+    type="rascl_hardware_interface::RasclHardwareInterface"
+    base_class_type="hardware_interface::SystemInterface">
+    <description>
+      RASCL SOEM hardware interface.
+    </description>
+  </class>
+</library>

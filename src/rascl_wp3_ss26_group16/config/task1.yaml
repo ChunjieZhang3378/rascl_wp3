@@ -1,0 +1,5 @@
+wp3_tsk1:
+  ros__parameters:
+    trajectory_input_directory: "trajectories/input"
+    trajectory_output_directory: "trajectories/output"
+    controller_mode: "CSP"

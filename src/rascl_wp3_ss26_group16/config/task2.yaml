@@ -1,0 +1,5 @@
+wp3_tsk2:
+  ros__parameters:
+    goal_pose_topic: "/goal_poses"
+    minimum_feasible_radius: 0.0  # TODO: determine experimentally
+    maximum_feasible_radius: 0.0  # TODO: determine experimentally

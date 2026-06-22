@@ -1,0 +1,193 @@
+<?xml version="1.0"?>
+<robot xmlns:xacro="http://www.ros.org/wiki/xacro" name="rascl_bot">
+  <link name="world" />
+
+  <joint name="base_link_joint" type="fixed">
+    <parent link="world" />
+    <child link="base_link" />
+    <origin xyz="0 0 0" rpy="0 0 0" />
+  </joint>
+
+  <link name="base_link">
+    <visual>
+      <origin xyz="0 0 0" rpy="0 0 0" />
+      <geometry>
+        <mesh filename="package://rascl_description/meshes/base_link.dae" />
+      </geometry>
+    </visual>
+    <collision>
+      <origin xyz="0 0 0" rpy="0 0 0" />
+      <geometry>
+        <mesh filename="package://rascl_description/meshes/base_link.stl" />
+      </geometry>
+    </collision>
+  </link>
+
+  <joint name="shoulder_joint" type="revolute">
+    <parent link="base_link" />
+    <child link="shoulder" />
+    <origin xyz="0 0 0.057441" rpy="0 0 0" />
+    <axis xyz="0 0 1" />
+    <limit lower="-1.570796327" upper="1.570796327" effort="100" velocity="100" />
+  </joint>
+
+  <link name="shoulder">
+    <visual>
+      <origin xyz="0 0 0" rpy="0 0 0" />
+      <geometry>
+        <mesh filename="package://rascl_description/meshes/shoulder.dae" />
+      </geometry>
+    </visual>
+  </link>
+  
+  <joint name="upperarm_joint" type="revolute">
+    <parent link="shoulder" />
+    <child link="upperarm_link" />
+    <origin xyz="-0.0116 -0.0057 0.06556" rpy="1.57 -1.57 3.14159265" />
+    <axis xyz="0 0 1" />
+    <limit lower="-1.570796327" upper="1.570796327" effort="100" velocity="100" />
+  </joint>
+
+  <link name="upperarm_link">
+    <visual>
+      <origin xyz="0 0 0" rpy="0 0 0" />
+      <geometry>
+        <mesh filename="package://rascl_description/meshes/upperarm.dae" />
+      </geometry>
+    </visual>
+	<collision>
+      <origin xyz="0 0 0" rpy="0 0 0" />
+	  <geometry>
+        <mesh filename="package://rascl_description/meshes/upperarm.stl" />
+      </geometry>
+	</collision>
+  </link>
+
+<joint name="lowerarm_joint" type="revolute">
+    <parent link="upperarm_link" />
+    <child link="lowerarm_link" />
+    <origin xyz="0.17 0.08 0.02183" rpy="0 3.14159265 0" />
+    <axis xyz="0 0 1" />
+    <limit lower="-1.570796327" upper="1.570796327" effort="100" velocity="100" />
+  </joint>
+
+     <link name="lowerarm_link">
+    <visual>
+      <origin xyz="0 0 0" rpy="0 0 0" />
+      <geometry>
+        <mesh filename="package://rascl_description/meshes/lowerarm.dae" />
+      </geometry>
+    </visual>
+    <collision>
+      <origin xyz="0 0 0" rpy="0 0 0" />
+      <geometry>
+        <mesh filename="package://rascl_description/meshes/lowerarm.stl" />
+      </geometry>
+    </collision>
+  </link>
+
+<joint name="end_effector_joint" type="revolute">
+  <parent link="lowerarm_link" />
+  <child link="end_effector_link" />
+  <origin xyz="0.12909 0 0.0179" rpy="3.1415926 0 1.570796327" />
+  <axis xyz="0 1 0" />
+  <limit lower="-1.570796327" upper="1.570796327" effort="100" velocity="1.0" />
+</joint>
+
+<!-- We will soon upload our new gripper file-->
+  <link name="end_effector_link">
+     <visual>
+      <origin xyz="0 0 0" rpy="0 0 0" />
+      <geometry>
+        <mesh filename="package://rascl_description/meshes/gripper.dae" />
+      </geometry>
+    </visual>
+    <collision>
+      <origin xyz="0 0 0" rpy="0 0 0" />
+      <geometry>
+        <mesh filename="package://rascl_description/meshes/gripper.stl" />
+      </geometry>
+    </collision>
+  </link>
+  
+
+  <ros2_control name="rascl_hardware_interface" type="system">
+    <hardware>
+      <plugin>rascl_hardware_interface/RasclHardwareInterface</plugin>
+      <param name="use_fake_hardware">false</param><!-- hardware interface currently always initializes EtherCAT -->
+      <param name="adapter">enx3c18a0264863</param><!-- interface name of ethernet usb dongle, standard en0, can be obtained with terminal command 'ifconfig' -->
+    </hardware>
+
+    <joint name="shoulder_joint">
+      <param name="slave_id">1</param>
+      <param name="drive_units_per_radian">511000</param>
+      <param name="profile_velocity">62000</param>
+      <param name="profile_acceleration">100</param>
+      <param name="profile_deceleration">100</param>
+      <param name="motion_profile_type">1</param>
+      <command_interface name="position"><!-- interface for position control -->
+        <param name="min">-1.570796327</param>
+        <param name="max">1.570796327</param>
+        <param name="initial_value">0.0</param>
+      </command_interface>
+      <state_interface name="position" />
+      <state_interface name="velocity" />
+      <state_interface name="actual_position" />
+      <state_interface name="status_word" />
+    </joint>
+
+       <joint name="upperarm_joint">
+      <param name="slave_id">2</param>
+      <param name="drive_units_per_radian">511000</param>
+      <param name="profile_velocity">62000</param>
+      <param name="profile_acceleration">100</param>
+      <param name="profile_deceleration">100</param>
+      <param name="motion_profile_type">1</param>
+      <command_interface name="position"><!-- interface for position control -->
+        <param name="min">-1.570796327</param>
+        <param name="max">1.570796327</param>
+        <param name="initial_value">0.0</param>
+      </command_interface>
+      <state_interface name="position" />
+      <state_interface name="velocity" />
+      <state_interface name="actual_position" />
+      <state_interface name="status_word" />
+    </joint>
+
+       <joint name="lowerarm_joint">
+      <param name="slave_id">3</param>
+      <param name="drive_units_per_radian">511000</param>
+      <param name="profile_velocity">62000</param>
+      <param name="profile_acceleration">100</param>
+      <param name="profile_deceleration">100</param>
+      <param name="motion_profile_type">1</param>
+      <command_interface name="position"><!-- interface for position control -->
+        <param name="min">-1.570796327</param>
+        <param name="max">1.570796327</param>
+        <param name="initial_value">0.0</param>
+      </command_interface>
+      <state_interface name="position" />
+      <state_interface name="velocity" />
+      <state_interface name="actual_position" />
+      <state_interface name="status_word" />
+    </joint>
+
+    <joint name="end_effector_joint">
+      <param name="slave_id">4</param>
+      <param name="drive_units_per_radian">210563</param>
+      <param name="profile_velocity">25000</param>
+      <param name="profile_acceleration">100</param>
+      <param name="profile_deceleration">100</param>
+      <param name="motion_profile_type">1</param>
+      <command_interface name="position"><!-- interface for position control -->
+        <param name="initial_value">0.0</param>
+      </command_interface>
+      <state_interface name="position" />
+      <state_interface name="velocity" />
+      <state_interface name="actual_position" />
+      <state_interface name="status_word" />
+    </joint>
+
+  </ros2_control>
+
+</robot>
