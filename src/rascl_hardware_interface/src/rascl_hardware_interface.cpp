@@ -192,6 +192,7 @@ hardware_interface::CallbackReturn RasclHardwareInterface::on_configure(
   ethercat_context_ = {};
   ethercat_initialized_ = false;
   ethercat_operational_ = false;
+  csp_process_data_ready_ = false;
 
   // Open the raw-socket master on the configured network interface.
   if (!ecx_init(&ethercat_context_, adapter_.c_str())) {
@@ -207,6 +208,8 @@ hardware_interface::CallbackReturn RasclHardwareInterface::on_configure(
     return hardware_interface::CallbackReturn::ERROR;
   }
 
+  // Configure distributed clocks when supported by the connected slaves.
+  ecx_configdc(&ethercat_context_);
   ethercat_initialized_ = true;
 
   // SDO configuration is performed in PRE-OP, before cyclic operation starts.
@@ -245,131 +248,24 @@ hardware_interface::CallbackReturn RasclHardwareInterface::on_configure(
         kLogger, "Could not read 0x1018 for joint '%s', continuing basic setup",
         joint_name.c_str());
     }
-
-    uint8_t number_of_entries = 0;
-    uint16_t pdo_mapping = kRxPdoMapping;
-    const uint32_t rx_entries[] = {
-      kRxPdoControlWord, kRxPdoTargetPosition, kRxPdoOperationMode};
-
-    if (ecx_SDOwrite(
-        &ethercat_context_, slave, kRxPdoAssignment, 0x00, FALSE,
-        sizeof(number_of_entries), &number_of_entries, EC_TIMEOUTRXM) <= 0 ||
-      ecx_SDOwrite(
-        &ethercat_context_, slave, kRxPdoMapping, 0x00, FALSE,
-        sizeof(number_of_entries), &number_of_entries, EC_TIMEOUTRXM) <= 0)
-    {
-      RCLCPP_ERROR(kLogger, "Failed to clear RxPDO mapping for joint '%s'", joint_name.c_str());
-      return hardware_interface::CallbackReturn::ERROR;
-    }
-
-    for (uint8_t entry = 0; entry < 3; ++entry) {
-      if (ecx_SDOwrite(
-          &ethercat_context_, slave, kRxPdoMapping, entry + 1, FALSE,
-          sizeof(rx_entries[entry]), &rx_entries[entry], EC_TIMEOUTRXM) <= 0)
-      {
-        RCLCPP_ERROR(kLogger, "Failed to map RxPDO for joint '%s'", joint_name.c_str());
-        return hardware_interface::CallbackReturn::ERROR;
-      }
-    }
-
-    number_of_entries = 3;
-    if (ecx_SDOwrite(
-        &ethercat_context_, slave, kRxPdoMapping, 0x00, FALSE,
-        sizeof(number_of_entries), &number_of_entries, EC_TIMEOUTRXM) <= 0)
-    {
-      RCLCPP_ERROR(kLogger, "Failed to enable RxPDO mapping for joint '%s'", joint_name.c_str());
-      return hardware_interface::CallbackReturn::ERROR;
-    }
-
-    number_of_entries = 1;
-    if (ecx_SDOwrite(
-        &ethercat_context_, slave, kRxPdoAssignment, 0x01, FALSE,
-        sizeof(pdo_mapping), &pdo_mapping, EC_TIMEOUTRXM) <= 0 ||
-      ecx_SDOwrite(
-        &ethercat_context_, slave, kRxPdoAssignment, 0x00, FALSE,
-        sizeof(number_of_entries), &number_of_entries, EC_TIMEOUTRXM) <= 0)
-    {
-      RCLCPP_ERROR(kLogger, "Failed to assign RxPDO for joint '%s'", joint_name.c_str());
-      return hardware_interface::CallbackReturn::ERROR;
-    }
-
-    number_of_entries = 0;
-    pdo_mapping = kTxPdoMapping;
-    const uint32_t tx_entries[] = {
-      kTxPdoStatusWord, kTxPdoActualPosition, kTxPdoOperationModeDisplay};
-
-    if (ecx_SDOwrite(
-        &ethercat_context_, slave, kTxPdoAssignment, 0x00, FALSE,
-        sizeof(number_of_entries), &number_of_entries, EC_TIMEOUTRXM) <= 0 ||
-      ecx_SDOwrite(
-        &ethercat_context_, slave, kTxPdoMapping, 0x00, FALSE,
-        sizeof(number_of_entries), &number_of_entries, EC_TIMEOUTRXM) <= 0)
-    {
-      RCLCPP_ERROR(kLogger, "Failed to clear TxPDO mapping for joint '%s'", joint_name.c_str());
-      return hardware_interface::CallbackReturn::ERROR;
-    }
-
-    for (uint8_t entry = 0; entry < 3; ++entry) {
-      if (ecx_SDOwrite(
-          &ethercat_context_, slave, kTxPdoMapping, entry + 1, FALSE,
-          sizeof(tx_entries[entry]), &tx_entries[entry], EC_TIMEOUTRXM) <= 0)
-      {
-        RCLCPP_ERROR(kLogger, "Failed to map TxPDO for joint '%s'", joint_name.c_str());
-        return hardware_interface::CallbackReturn::ERROR;
-      }
-    }
-
-    number_of_entries = 3;
-    if (ecx_SDOwrite(
-        &ethercat_context_, slave, kTxPdoMapping, 0x00, FALSE,
-        sizeof(number_of_entries), &number_of_entries, EC_TIMEOUTRXM) <= 0)
-    {
-      RCLCPP_ERROR(kLogger, "Failed to enable TxPDO mapping for joint '%s'", joint_name.c_str());
-      return hardware_interface::CallbackReturn::ERROR;
-    }
-
-    number_of_entries = 1;
-    if (ecx_SDOwrite(
-        &ethercat_context_, slave, kTxPdoAssignment, 0x01, FALSE,
-        sizeof(pdo_mapping), &pdo_mapping, EC_TIMEOUTRXM) <= 0 ||
-      ecx_SDOwrite(
-        &ethercat_context_, slave, kTxPdoAssignment, 0x00, FALSE,
-        sizeof(number_of_entries), &number_of_entries, EC_TIMEOUTRXM) <= 0)
-    {
-      RCLCPP_ERROR(kLogger, "Failed to assign TxPDO for joint '%s'", joint_name.c_str());
-      return hardware_interface::CallbackReturn::ERROR;
-    }
   }
 
-  io_map_.assign(kIoMapSize, 0);
-  const int mapped_bytes = ecx_config_map_group(&ethercat_context_, io_map_.data(), 0);
-  if (mapped_bytes <= 0 || static_cast<size_t>(mapped_bytes) > io_map_.size()) {
-    RCLCPP_ERROR(kLogger, "Failed to create EtherCAT process-data map");
-    return hardware_interface::CallbackReturn::ERROR;
-  }
-
-  ecx_configdc(&ethercat_context_);
-  expected_work_counter_ =
-    ethercat_context_.grouplist[0].outputsWKC * 2 +
-    ethercat_context_.grouplist[0].inputsWKC;
-
+  // Homing uses mailbox SDO access, so do not make PDO/CSP readiness a
+  // configuration prerequisite. This mirrors the older configuration flow and
+  // allows activation to run the drive-supported homing sequence first.
   const int safe_op_state = ecx_statecheck(
     &ethercat_context_, 0, EC_STATE_SAFE_OP, EC_TIMEOUTSTATE);
-  if ((safe_op_state & EC_STATE_SAFE_OP) == 0) {
-    RCLCPP_ERROR(kLogger, "EtherCAT slaves did not reach SAFE-OP");
-    return hardware_interface::CallbackReturn::ERROR;
-  }
+  if ((safe_op_state & EC_STATE_SAFE_OP) != 0) {
+    ethercat_context_.slavelist[0].state = EC_STATE_OPERATIONAL;
+    ecx_writestate(&ethercat_context_, 0);
 
-  ecx_send_processdata(&ethercat_context_);
-  ecx_receive_processdata(&ethercat_context_, EC_TIMEOUTRET);
-  ethercat_context_.slavelist[0].state = EC_STATE_OPERATIONAL;
-  ecx_writestate(&ethercat_context_, 0);
-
-  const int reached_state = ecx_statecheck(
-    &ethercat_context_, 0, EC_STATE_OPERATIONAL, EC_TIMEOUTSTATE);
-  if ((reached_state & EC_STATE_OPERATIONAL) == 0) {
-    RCLCPP_ERROR(kLogger, "EtherCAT slaves did not reach OPERATIONAL");
-    return hardware_interface::CallbackReturn::ERROR;
+    const int reached_state = ecx_statecheck(
+      &ethercat_context_, 0, EC_STATE_OPERATIONAL, EC_TIMEOUTSTATE);
+    if ((reached_state & EC_STATE_OPERATIONAL) == 0) {
+      RCLCPP_WARN(kLogger, "EtherCAT slaves did not reach OPERATIONAL; continuing with SDO access");
+    }
+  } else {
+    RCLCPP_WARN(kLogger, "EtherCAT slaves did not reach SAFE-OP; continuing with SDO access");
   }
 
   ethercat_operational_ = true;
@@ -384,7 +280,7 @@ hardware_interface::CallbackReturn RasclHardwareInterface::on_activate(
   }
 
   if (!ethercat_operational_) {
-    RCLCPP_ERROR(kLogger, "EtherCAT is not OPERATIONAL");
+    RCLCPP_ERROR(kLogger, "EtherCAT communication is not ready");
     return hardware_interface::CallbackReturn::ERROR;
   }
 
@@ -662,39 +558,156 @@ hardware_interface::CallbackReturn RasclHardwareInterface::on_activate(
     return hardware_interface::CallbackReturn::ERROR;
   }
 
+  // Homing is complete. Now prepare the process-data path required by CSP.
+  // PDO remapping is intentionally done after homing so a CSP mapping problem
+  // cannot prevent the SDO-based homing sequence from running.
+  for (const auto slave : slave_ids_) {
+    ethercat_context_.slavelist[slave].state = EC_STATE_PRE_OP;
+    ecx_writestate(&ethercat_context_, slave);
+
+    const int reached_state = ecx_statecheck(
+      &ethercat_context_, slave, EC_STATE_PRE_OP, EC_TIMEOUTSTATE);
+    if ((reached_state & EC_STATE_PRE_OP) == 0) {
+      RCLCPP_ERROR(kLogger, "Slave %u did not return to PRE-OP for CSP PDO setup", slave);
+      return hardware_interface::CallbackReturn::ERROR;
+    }
+  }
+
+  for (auto i = 0u; i < slave_ids_.size(); ++i) {
+    const auto slave = slave_ids_[i];
+    const auto & joint_name = info_.joints[i].name;
+
+    uint8_t number_of_entries = 0;
+    uint16_t pdo_mapping = kRxPdoMapping;
+    const uint32_t rx_entries[] = {
+      kRxPdoControlWord, kRxPdoTargetPosition, kRxPdoOperationMode};
+
+    if (ecx_SDOwrite(
+        &ethercat_context_, slave, kRxPdoAssignment, 0x00, FALSE,
+        sizeof(number_of_entries), &number_of_entries, EC_TIMEOUTRXM) <= 0 ||
+      ecx_SDOwrite(
+        &ethercat_context_, slave, kRxPdoMapping, 0x00, FALSE,
+        sizeof(number_of_entries), &number_of_entries, EC_TIMEOUTRXM) <= 0)
+    {
+      RCLCPP_ERROR(kLogger, "Failed to clear RxPDO mapping for joint '%s'", joint_name.c_str());
+      return hardware_interface::CallbackReturn::ERROR;
+    }
+
+    for (uint8_t entry = 0; entry < 3; ++entry) {
+      if (ecx_SDOwrite(
+          &ethercat_context_, slave, kRxPdoMapping, entry + 1, FALSE,
+          sizeof(rx_entries[entry]), &rx_entries[entry], EC_TIMEOUTRXM) <= 0)
+      {
+        RCLCPP_ERROR(kLogger, "Failed to map RxPDO for joint '%s'", joint_name.c_str());
+        return hardware_interface::CallbackReturn::ERROR;
+      }
+    }
+
+    number_of_entries = 3;
+    if (ecx_SDOwrite(
+        &ethercat_context_, slave, kRxPdoMapping, 0x00, FALSE,
+        sizeof(number_of_entries), &number_of_entries, EC_TIMEOUTRXM) <= 0)
+    {
+      RCLCPP_ERROR(kLogger, "Failed to enable RxPDO mapping for joint '%s'", joint_name.c_str());
+      return hardware_interface::CallbackReturn::ERROR;
+    }
+
+    number_of_entries = 1;
+    if (ecx_SDOwrite(
+        &ethercat_context_, slave, kRxPdoAssignment, 0x01, FALSE,
+        sizeof(pdo_mapping), &pdo_mapping, EC_TIMEOUTRXM) <= 0 ||
+      ecx_SDOwrite(
+        &ethercat_context_, slave, kRxPdoAssignment, 0x00, FALSE,
+        sizeof(number_of_entries), &number_of_entries, EC_TIMEOUTRXM) <= 0)
+    {
+      RCLCPP_ERROR(kLogger, "Failed to assign RxPDO for joint '%s'", joint_name.c_str());
+      return hardware_interface::CallbackReturn::ERROR;
+    }
+
+    number_of_entries = 0;
+    pdo_mapping = kTxPdoMapping;
+    const uint32_t tx_entries[] = {
+      kTxPdoStatusWord, kTxPdoActualPosition, kTxPdoOperationModeDisplay};
+
+    if (ecx_SDOwrite(
+        &ethercat_context_, slave, kTxPdoAssignment, 0x00, FALSE,
+        sizeof(number_of_entries), &number_of_entries, EC_TIMEOUTRXM) <= 0 ||
+      ecx_SDOwrite(
+        &ethercat_context_, slave, kTxPdoMapping, 0x00, FALSE,
+        sizeof(number_of_entries), &number_of_entries, EC_TIMEOUTRXM) <= 0)
+    {
+      RCLCPP_ERROR(kLogger, "Failed to clear TxPDO mapping for joint '%s'", joint_name.c_str());
+      return hardware_interface::CallbackReturn::ERROR;
+    }
+
+    for (uint8_t entry = 0; entry < 3; ++entry) {
+      if (ecx_SDOwrite(
+          &ethercat_context_, slave, kTxPdoMapping, entry + 1, FALSE,
+          sizeof(tx_entries[entry]), &tx_entries[entry], EC_TIMEOUTRXM) <= 0)
+      {
+        RCLCPP_ERROR(kLogger, "Failed to map TxPDO for joint '%s'", joint_name.c_str());
+        return hardware_interface::CallbackReturn::ERROR;
+      }
+    }
+
+    number_of_entries = 3;
+    if (ecx_SDOwrite(
+        &ethercat_context_, slave, kTxPdoMapping, 0x00, FALSE,
+        sizeof(number_of_entries), &number_of_entries, EC_TIMEOUTRXM) <= 0)
+    {
+      RCLCPP_ERROR(kLogger, "Failed to enable TxPDO mapping for joint '%s'", joint_name.c_str());
+      return hardware_interface::CallbackReturn::ERROR;
+    }
+
+    number_of_entries = 1;
+    if (ecx_SDOwrite(
+        &ethercat_context_, slave, kTxPdoAssignment, 0x01, FALSE,
+        sizeof(pdo_mapping), &pdo_mapping, EC_TIMEOUTRXM) <= 0 ||
+      ecx_SDOwrite(
+        &ethercat_context_, slave, kTxPdoAssignment, 0x00, FALSE,
+        sizeof(number_of_entries), &number_of_entries, EC_TIMEOUTRXM) <= 0)
+    {
+      RCLCPP_ERROR(kLogger, "Failed to assign TxPDO for joint '%s'", joint_name.c_str());
+      return hardware_interface::CallbackReturn::ERROR;
+    }
+  }
+
+  io_map_.assign(kIoMapSize, 0);
+  const int mapped_bytes = ecx_config_map_group(&ethercat_context_, io_map_.data(), 0);
+  if (mapped_bytes <= 0 || static_cast<size_t>(mapped_bytes) > io_map_.size()) {
+    RCLCPP_ERROR(kLogger, "Failed to create EtherCAT process-data map for CSP");
+    return hardware_interface::CallbackReturn::ERROR;
+  }
+
+  ecx_configdc(&ethercat_context_);
+  expected_work_counter_ =
+    ethercat_context_.grouplist[0].outputsWKC * 2 +
+    ethercat_context_.grouplist[0].inputsWKC;
+
+  const int safe_op_state = ecx_statecheck(
+    &ethercat_context_, 0, EC_STATE_SAFE_OP, EC_TIMEOUTSTATE);
+  if ((safe_op_state & EC_STATE_SAFE_OP) == 0) {
+    RCLCPP_ERROR(kLogger, "EtherCAT slaves did not reach SAFE-OP for CSP");
+    return hardware_interface::CallbackReturn::ERROR;
+  }
+
+  ecx_send_processdata(&ethercat_context_);
+  ecx_receive_processdata(&ethercat_context_, EC_TIMEOUTRET);
+  ethercat_context_.slavelist[0].state = EC_STATE_OPERATIONAL;
+  ecx_writestate(&ethercat_context_, 0);
+
+  const int reached_state = ecx_statecheck(
+    &ethercat_context_, 0, EC_STATE_OPERATIONAL, EC_TIMEOUTSTATE);
+  if ((reached_state & EC_STATE_OPERATIONAL) == 0) {
+    RCLCPP_ERROR(kLogger, "EtherCAT slaves did not reach OPERATIONAL for CSP");
+    return hardware_interface::CallbackReturn::ERROR;
+  }
+
   // Stage 3: leave Homing mode, select Cyclic Synchronous Position mode, and
   // synchronize the ROS command with the measured post-homing position.
   for (auto i = 0u; i < slave_ids_.size(); ++i) {
     const auto slave = slave_ids_[i];
     const auto & joint_name = info_.joints[i].name;
-
-    uint16_t control_word = kControlEnableOperation;
-    if (ecx_SDOwrite(
-        &ethercat_context_, slave, kControlWord, 0x00, FALSE, sizeof(control_word),
-        &control_word, EC_TIMEOUTRXM) <= 0)
-    {
-      RCLCPP_ERROR(kLogger, "Failed to clear homing start for joint '%s'", joint_name.c_str());
-      return hardware_interface::CallbackReturn::ERROR;
-    }
-
-    control_word = kControlSwitchOn;
-    if (ecx_SDOwrite(
-        &ethercat_context_, slave, kControlWord, 0x00, FALSE, sizeof(control_word),
-        &control_word, EC_TIMEOUTRXM) <= 0)
-    {
-      RCLCPP_ERROR(
-        kLogger, "Failed to switch joint '%s' back to switched on before profile setup",
-        joint_name.c_str());
-      return hardware_interface::CallbackReturn::ERROR;
-    }
-
-    uint16_t status_word = 0;
-    if (!wait_for_status(slave, joint_name, 0x006F, 0x0023, status_word)) {
-      RCLCPP_ERROR(
-        kLogger, "Joint '%s' did not reach statusword 0x0023 before profile setup",
-        joint_name.c_str());
-      return hardware_interface::CallbackReturn::ERROR;
-    }
 
     int8_t mode = kCyclicSynchronousPositionMode;
     if (ecx_SDOwrite(
@@ -725,6 +738,45 @@ hardware_interface::CallbackReturn RasclHardwareInterface::on_activate(
       RCLCPP_WARN(
         kLogger, "Joint '%s' did not confirm mode 0x6061 = 8, continuing activation",
         joint_name.c_str());
+    }
+
+    uint16_t status_word = 0;
+
+    // PDO remapping can leave the drive back in Switch On Disabled (0x0040).
+    // Run the complete CiA 402 enable sequence again before entering CSP.
+    uint16_t control_word = kControlEnableVoltage;
+    if (ecx_SDOwrite(
+        &ethercat_context_, slave, kControlWord, 0x00, FALSE, sizeof(control_word),
+        &control_word, EC_TIMEOUTRXM) <= 0)
+    {
+      RCLCPP_ERROR(kLogger, "Failed to send 0x0006 for joint '%s' after homing", joint_name.c_str());
+      return hardware_interface::CallbackReturn::ERROR;
+    }
+
+    if (!wait_for_status(slave, joint_name, 0x006F, 0x0021, status_word)) {
+      RCLCPP_WARN(
+        kLogger,
+        "Joint '%s' did not confirm statusword 0x0021 after homing, continuing; "
+        "latest statusword: 0x%04X",
+        joint_name.c_str(), status_word);
+    }
+
+    control_word = kControlSwitchOn;
+    if (ecx_SDOwrite(
+        &ethercat_context_, slave, kControlWord, 0x00, FALSE, sizeof(control_word),
+        &control_word, EC_TIMEOUTRXM) <= 0)
+    {
+      RCLCPP_ERROR(
+        kLogger, "Failed to send 0x0007 for joint '%s' after homing", joint_name.c_str());
+      return hardware_interface::CallbackReturn::ERROR;
+    }
+
+    if (!wait_for_status(slave, joint_name, 0x006F, 0x0023, status_word)) {
+      RCLCPP_WARN(
+        kLogger,
+        "Joint '%s' did not confirm statusword 0x0023 after homing, continuing; "
+        "latest statusword: 0x%04X",
+        joint_name.c_str(), status_word);
     }
 
     int32_t actual_position = 0;
@@ -767,12 +819,16 @@ hardware_interface::CallbackReturn RasclHardwareInterface::on_activate(
 
     status_word = 0;
     if (!wait_for_status(slave, joint_name, 0x006F, 0x0027, status_word)) {
-      RCLCPP_ERROR(kLogger, "Joint '%s' did not reach statusword 0x0027", joint_name.c_str());
-      return hardware_interface::CallbackReturn::ERROR;
+      RCLCPP_WARN(
+        kLogger,
+        "Joint '%s' did not confirm statusword 0x0027 after CSP setup, continuing; "
+        "latest statusword: 0x%04X",
+        joint_name.c_str(), status_word);
+    } else {
+      RCLCPP_INFO(
+        kLogger, "Joint '%s' reached operation enabled, statusword: 0x%04X",
+        joint_name.c_str(), status_word);
     }
-    RCLCPP_INFO(
-      kLogger, "Joint '%s' reached operation enabled, statusword: 0x%04X",
-      joint_name.c_str(), status_word);
 
     if (!read_status_word(slave, joint_name, status_word)) {
       return hardware_interface::CallbackReturn::ERROR;
@@ -805,6 +861,7 @@ hardware_interface::CallbackReturn RasclHardwareInterface::on_activate(
     return hardware_interface::CallbackReturn::ERROR;
   }
 
+  csp_process_data_ready_ = true;
   return hardware_interface::CallbackReturn::SUCCESS;
 }
 
@@ -826,6 +883,7 @@ hardware_interface::CallbackReturn RasclHardwareInterface::on_deactivate(
     }
   }
 
+  csp_process_data_ready_ = false;
   return hardware_interface::CallbackReturn::SUCCESS;
 }
 
@@ -839,6 +897,7 @@ hardware_interface::CallbackReturn RasclHardwareInterface::on_cleanup(
 
   ethercat_initialized_ = false;
   ethercat_operational_ = false;
+  csp_process_data_ready_ = false;
   io_map_.clear();
   expected_work_counter_ = 0;
   return hardware_interface::CallbackReturn::SUCCESS;
@@ -882,16 +941,55 @@ hardware_interface::return_type RasclHardwareInterface::read(
   const rclcpp::Time & /* time */,
   const rclcpp::Duration & period)
 {
-  if (!ethercat_initialized_ || !ethercat_operational_) {
+  if (!ethercat_initialized_ || !ethercat_operational_ || !csp_process_data_ready_) {
     return hardware_interface::return_type::ERROR;
   }
 
+  ecx_send_processdata(&ethercat_context_);
   const int work_counter = ecx_receive_processdata(&ethercat_context_, EC_TIMEOUTRET);
   if (work_counter < expected_work_counter_) {
-    RCLCPP_ERROR(
-      kLogger, "Incomplete EtherCAT process data: WKC %d, expected %d",
+    RCLCPP_WARN(
+      kLogger, "Incomplete EtherCAT process data: WKC %d, expected %d; using SDO state fallback",
       work_counter, expected_work_counter_);
-    return hardware_interface::return_type::ERROR;
+
+    for (auto i = 0u; i < hw_positions_.size(); ++i) {
+      const auto slave = slave_ids_[i];
+      const auto & joint_name = info_.joints[i].name;
+      uint16_t status_word = 0;
+      int32_t actual_position = 0;
+      int size = sizeof(status_word);
+
+      if (ecx_SDOread(
+          &ethercat_context_, slave, kStatusWord, 0x00, FALSE, &size, &status_word,
+          EC_TIMEOUTRXM) <= 0)
+      {
+        RCLCPP_ERROR(kLogger, "Failed SDO fallback statusword read for joint '%s'",
+          joint_name.c_str());
+        return hardware_interface::return_type::ERROR;
+      }
+
+      size = sizeof(actual_position);
+      if (ecx_SDOread(
+          &ethercat_context_, slave, kPositionActualValue, 0x00, FALSE, &size,
+          &actual_position, EC_TIMEOUTRXM) <= 0)
+      {
+        RCLCPP_ERROR(kLogger, "Failed SDO fallback actual-position read for joint '%s'",
+          joint_name.c_str());
+        return hardware_interface::return_type::ERROR;
+      }
+
+      const double previous_position = hw_positions_[i];
+      hw_actual_positions_[i] = static_cast<double>(actual_position);
+      hw_positions_[i] = static_cast<double>(actual_position) / drive_units_per_radian_[i];
+
+      const double period_seconds = period.seconds();
+      hw_velocities_[i] = period_seconds > 0.0 ?
+        (hw_positions_[i] - previous_position) / period_seconds : 0.0;
+      hw_status_words_[i] = static_cast<double>(status_word);
+      last_status_words_[i] = status_word;
+    }
+
+    return hardware_interface::return_type::OK;
   }
 
   for (auto i = 0u; i < hw_positions_.size(); ++i) {
@@ -935,7 +1033,7 @@ hardware_interface::return_type RasclHardwareInterface::write(
   const rclcpp::Time & /* time */,
   const rclcpp::Duration & /* period */)
 {
-  if (!ethercat_initialized_ || !ethercat_operational_) {
+  if (!ethercat_initialized_ || !ethercat_operational_ || !csp_process_data_ready_) {
     return hardware_interface::return_type::ERROR;
   }
 

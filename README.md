@@ -140,7 +140,7 @@ ip link show
 6. In another sourced terminal, check that the controllers are loaded:
 
    ```bash
-   docker exec -it rascl-gruppe16 bash
+   docker exec -it rascl-wp3-gruppe16 bash
    rossetup
    ros2 control list_controllers
    ```
@@ -160,7 +160,7 @@ configuration. Launching without the real hardware connected, or without the
 Use a second terminal inside the container after ROS2 Control launch:
 
 ```bash
-docker exec -it rascl-gruppe16 bash
+docker exec -it rascl-wp3-gruppe16 bash
 rossetup
 ```
 

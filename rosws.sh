@@ -1,6 +1,6 @@
 #!/usr/bin/bash
 IMAGE_NAME=ros2-irs-rascl-gruppe16
-CONTAINER_NAME=${CONTAINER_NAME:-rascl-gruppe16}
+CONTAINER_NAME=${CONTAINER_NAME:-rascl-wp3-gruppe16}
 ROS_DOMAIN_ID=${ROS_DOMAIN_ID:-16}
 
 set -e

@@ -102,6 +102,7 @@ private:
   // EtherCAT connection and lifecycle state.
   bool ethercat_initialized_{false};
   bool ethercat_operational_{false};
+  bool csp_process_data_ready_{false};
   ecx_contextt ethercat_context_{};
   std::string adapter_;
   std::vector<uint8_t> io_map_;
