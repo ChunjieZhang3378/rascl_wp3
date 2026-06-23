@@ -194,11 +194,28 @@ Return the robot to zero:
 ```bash
 ros2 action send_goal /joint_trajectory_controller/follow_joint_trajectory \
   control_msgs/action/FollowJointTrajectory \
-  "{trajectory: {joint_names: [shoulder_joint, upperarm_joint, lowerarm_joint, end_effector_joint], points: [{positions: [0.0, 0.0, 0.0, 0.0], time_from_start: {sec: 10, nanosec: 0}}]}}"
+  "{trajectory: {joint_names: [shoulder_joint, upperarm_joint, lowerarm_joint, end_effector_joint], points: [{positions: [0.0, 0.0, 0.0, 0.0], time_from_start: {sec: 2, nanosec: 0}}]}}"
 ```  
 
 Before sending motion commands, make sure the robot has clearance, the power
 supply is current-limited appropriately, and nobody is backdriving the motors.
 
 ## wp3
+Allow the container to open GUI windows on the host:
+```bash
+xhost +local:root
+```
+
+Launch arm
+```bash
+ldconfig
+ros2 launch rascl_description ros2_control.launch.py
+```
+
+ros2 launch rascl_description display.launch.py
+
+Launch task 1 in sim/real
+```bash
 ros2 launch rascl_wp3_ss26_group16 wp3_tsk1_sim.launch.py
+ros2 launch rascl_wp3_ss26_group16 wp3_tsk1.launch.py
+```
