@@ -199,3 +199,6 @@ ros2 action send_goal /joint_trajectory_controller/follow_joint_trajectory \
 
 Before sending motion commands, make sure the robot has clearance, the power
 supply is current-limited appropriately, and nobody is backdriving the motors.
+
+## wp3
+ros2 launch rascl_wp3_ss26_group16 wp3_tsk1_sim.launch.py

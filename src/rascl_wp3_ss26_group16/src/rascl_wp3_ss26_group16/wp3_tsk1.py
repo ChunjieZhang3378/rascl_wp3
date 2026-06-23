@@ -9,6 +9,7 @@ from control_msgs.action import FollowJointTrajectory
 import rclpy
 from rclpy.action import ActionClient
 from rclpy.node import Node
+from sensor_msgs.msg import JointState
 from trajectory_msgs.msg import JointTrajectoryPoint
 
 
@@ -71,6 +72,7 @@ class Task1Node(Node):
         self.declare_parameter("trajectory_output_directory", "trajectories/output")
         self.declare_parameter("controller_mode", "CSP")
         self.declare_parameter("sample_period", 0.02)
+        self.declare_parameter("simulate_only", False)
         self.declare_parameter(
             "trajectory_action", "/joint_trajectory_controller/follow_joint_trajectory"
         )
@@ -97,12 +99,18 @@ class Task1Node(Node):
         if self.sample_period <= 0.0:
             raise ValueError("sample_period must be positive")
 
+        self.simulate_only = bool(self.get_parameter("simulate_only").value)
         self.output_directory.mkdir(parents=True, exist_ok=True)
-        self.action_client = ActionClient(
-            self,
-            FollowJointTrajectory,
-            str(self.get_parameter("trajectory_action").value),
-        )
+        self.joint_state_publisher = None
+        self.action_client = None
+        if self.simulate_only:
+            self.joint_state_publisher = self.create_publisher(JointState, "joint_states", 10)
+        else:
+            self.action_client = ActionClient(
+                self,
+                FollowJointTrajectory,
+                str(self.get_parameter("trajectory_action").value),
+            )
 
     def load_waypoints(self, input_path):
         """Read one cube trajectory and validate its waypoint rows."""
@@ -167,6 +175,9 @@ class Task1Node(Node):
 
     def execute_trajectory(self, trajectory, trajectory_name):
         """Send one generated trajectory and wait for its action result."""
+        if self.action_client is None:
+            raise RuntimeError("trajectory action client is unavailable in simulation preview mode")
+
         goal = FollowJointTrajectory.Goal()
         goal.trajectory.joint_names = list(JOINT_NAMES)
         for time_from_start, positions, velocities, accelerations in trajectory:
@@ -203,6 +214,26 @@ class Task1Node(Node):
                 f"{result.error_string}"
             )
 
+    def preview_trajectory(self, trajectory, trajectory_name):
+        """Publish one generated trajectory as joint states for RViz preview."""
+        if self.joint_state_publisher is None:
+            raise RuntimeError("joint state publisher is unavailable outside simulation preview mode")
+
+        self.get_logger().info(f"Previewing {trajectory_name}")
+        previous_time = 0.0
+        for time_from_start, positions, velocities, _accelerations in trajectory:
+            delay = max(0.0, time_from_start - previous_time)
+            if delay > 0.0:
+                rclpy.spin_once(self, timeout_sec=delay)
+
+            message = JointState()
+            message.header.stamp = self.get_clock().now().to_msg()
+            message.name = list(JOINT_NAMES)
+            message.position = positions
+            message.velocity = velocities
+            self.joint_state_publisher.publish(message)
+            previous_time = time_from_start
+
     def run(self):
         """Generate and execute cube 1, cube 2, then cube 3."""
         generated_trajectories = []
@@ -217,6 +248,13 @@ class Task1Node(Node):
             self.get_logger().info(
                 f"Generated {len(trajectory)} samples in {output_path}"
             )
+
+        if self.simulate_only:
+            self.get_logger().info("Simulation preview mode: publishing trajectories to RViz")
+            for filename, trajectory in generated_trajectories:
+                self.preview_trajectory(trajectory, filename)
+            self.get_logger().info("Task 1 preview completed: cube 1, cube 2, cube 3")
+            return
 
         self.get_logger().info("Waiting for joint trajectory controller")
         if not self.action_client.wait_for_server(timeout_sec=10.0):
