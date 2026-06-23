@@ -17,7 +17,7 @@ setup(
         ("share/" + package_name + "/config", glob("config/*.yaml")),
         (
             "share/" + package_name + "/trajectories/input",
-            glob("trajectories/input/*"),
+            glob("trajectories/input/*.csv"),
         ),
     ],
     install_requires=["setuptools"],

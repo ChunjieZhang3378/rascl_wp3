@@ -27,7 +27,7 @@
     <parent link="base_link" />
     <child link="shoulder" />
     <origin xyz="0 0 0.057441" rpy="0 0 0" />
-    <axis xyz="0 0 1" />
+    <axis xyz="0 0 -1" />
     <limit lower="-1.570796327" upper="1.570796327" effort="100" velocity="100" />
   </joint>
 
@@ -44,7 +44,7 @@
     <parent link="shoulder" />
     <child link="upperarm_link" />
     <origin xyz="-0.0116 -0.0057 0.06556" rpy="1.57 -1.57 3.14159265" />
-    <axis xyz="0 0 1" />
+    <axis xyz="0 0 -1" />
     <limit lower="-1.570796327" upper="1.570796327" effort="100" velocity="100" />
   </joint>
 
@@ -67,7 +67,7 @@
     <parent link="upperarm_link" />
     <child link="lowerarm_link" />
     <origin xyz="0.17 0.08 0.02183" rpy="0 3.14159265 -1.570796327" />
-    <axis xyz="0 0 1" />
+    <axis xyz="0 0 -1" />
     <limit lower="-1.570796327" upper="1.570796327" effort="100" velocity="100" />
   </joint>
 
