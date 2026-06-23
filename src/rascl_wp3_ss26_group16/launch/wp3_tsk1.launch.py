@@ -1,7 +1,9 @@
-"""Launch description placeholder for Task 1."""
+"""Launch the Task 1 offline trajectory executor."""
 
 from launch import LaunchDescription
+from launch.substitutions import PathJoinSubstitution
 from launch_ros.actions import Node
+from launch_ros.substitutions import FindPackageShare
 
 
 def generate_launch_description():
@@ -11,5 +13,10 @@ def generate_launch_description():
             executable="wp3_tsk1",
             name="wp3_tsk1",
             output="screen",
+            parameters=[
+                PathJoinSubstitution(
+                    [FindPackageShare("rascl_wp3_ss26_group16"), "config", "task1.yaml"]
+                )
+            ],
         ),
     ])

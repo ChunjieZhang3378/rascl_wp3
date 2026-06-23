@@ -18,14 +18,14 @@ The hardware interface implements the standard `ros2_control` lifecycle:
 1. `on_init()` parses and validates the URDF hardware and joint parameters. It
    does not access or move the real robot.
 2. `on_configure()` opens the configured Ethernet adapter, discovers the
-   EtherCAT slaves, and prepares SDO communication.
+   EtherCAT slaves, maps CSP process data, and enters OPERATIONAL state.
 3. `on_activate()` resets drive faults, selects Homing mode, enables and homes
-   all joints, and then switches the drives to Profile Position mode. This step
+   all joints, and then switches the drives to CSP mode. This step
    can move the physical robot.
-4. `read()` obtains each statusword and actual position and estimates joint
-   velocity from consecutive position samples.
+4. `read()` receives each statusword and actual position through TxPDO process
+   data and estimates joint velocity from consecutive position samples.
 5. `write()` validates and converts position commands, clamps joints with URDF
-   limits, and sends new Profile Position targets.
+   limits, and sends CSP targets through RxPDO process data.
 6. `on_deactivate()` disables drive voltage, and `on_cleanup()` closes the SOEM
    connection.
 
@@ -42,10 +42,6 @@ The parameters are defined in the `<ros2_control>` section of
 | `use_fake_hardware` | No | Currently ignored; configuration always opens the real EtherCAT adapter. |
 | `slave_id` | No | EtherCAT slave number; defaults to the joint index plus one. |
 | `drive_units_per_radian` | Yes | Conversion factor between ROS radians and drive position counts. |
-| `profile_velocity` | No | CiA 402 Profile Velocity value (`0x6081`). |
-| `profile_acceleration` | No | CiA 402 Profile Acceleration value (`0x6083`). |
-| `profile_deceleration` | No | CiA 402 Profile Deceleration value (`0x6084`). |
-| `motion_profile_type` | No | Motion Profile Type value (`0x6086`). |
 
 Each joint must provide one `position` command interface and at least the
 `position` and `velocity` state interfaces. A command interface may provide
@@ -71,7 +67,7 @@ Each joint exports four state interfaces:
 
 - Clear the robot workspace and prepare the emergency stop before activation.
 - Activation automatically enables and homes all configured drives. 
-- Verify the adapter, slave IDs, homing methods, conversion factors, and motion
-  profile values before applying power.
+- Verify the adapter, slave IDs, homing methods, and conversion factors before
+  applying power.
 - URDF limits are a final software boundary, not a replacement for mechanical
   stops, drive limits, or an emergency-stop circuit.

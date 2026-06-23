@@ -3,3 +3,5 @@ wp3_tsk1:
     trajectory_input_directory: "trajectories/input"
     trajectory_output_directory: "trajectories/output"
     controller_mode: "CSP"
+    sample_period: 0.02
+    trajectory_action: "/joint_trajectory_controller/follow_joint_trajectory"

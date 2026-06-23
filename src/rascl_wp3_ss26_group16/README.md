@@ -1,6 +1,6 @@
 # RASCL WP3 SS26 — Group 16
 
-ROS 2 package skeleton for both Work Package 3 tasks.
+ROS 2 package for both Work Package 3 tasks.
 
 ## Nodes
 
@@ -12,4 +12,6 @@ ROS 2 package skeleton for both Work Package 3 tasks.
 - `wp3_tsk1.launch.py`
 - `wp3_tsk2.launch.py`
 
-The task logic is intentionally not implemented yet.
+Task 1 reads the three ordered waypoint CSV files documented in
+`trajectories/input/README.md`, generates minimum-jerk trajectories, and sends
+them to `joint_trajectory_controller`.

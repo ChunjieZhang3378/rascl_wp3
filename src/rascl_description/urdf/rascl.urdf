@@ -121,10 +121,6 @@
     <joint name="shoulder_joint">
       <param name="slave_id">1</param>
       <param name="drive_units_per_radian">511000</param>
-      <param name="profile_velocity">62000</param>
-      <param name="profile_acceleration">100</param>
-      <param name="profile_deceleration">100</param>
-      <param name="motion_profile_type">1</param>
       <command_interface name="position"><!-- interface for position control -->
         <param name="min">-1.570796327</param>
         <param name="max">1.570796327</param>
@@ -139,10 +135,6 @@
        <joint name="upperarm_joint">
       <param name="slave_id">2</param>
       <param name="drive_units_per_radian">511000</param>
-      <param name="profile_velocity">62000</param>
-      <param name="profile_acceleration">100</param>
-      <param name="profile_deceleration">100</param>
-      <param name="motion_profile_type">1</param>
       <command_interface name="position"><!-- interface for position control -->
         <param name="min">-1.570796327</param>
         <param name="max">1.570796327</param>
@@ -157,10 +149,6 @@
        <joint name="lowerarm_joint">
       <param name="slave_id">3</param>
       <param name="drive_units_per_radian">511000</param>
-      <param name="profile_velocity">62000</param>
-      <param name="profile_acceleration">100</param>
-      <param name="profile_deceleration">100</param>
-      <param name="motion_profile_type">1</param>
       <command_interface name="position"><!-- interface for position control -->
         <param name="min">-1.570796327</param>
         <param name="max">1.570796327</param>
@@ -175,10 +163,6 @@
     <joint name="end_effector_joint">
       <param name="slave_id">4</param>
       <param name="drive_units_per_radian">210563</param>
-      <param name="profile_velocity">25000</param>
-      <param name="profile_acceleration">100</param>
-      <param name="profile_deceleration">100</param>
-      <param name="motion_profile_type">1</param>
       <command_interface name="position"><!-- interface for position control -->
         <param name="initial_value">0.0</param>
       </command_interface>

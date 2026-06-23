@@ -21,8 +21,8 @@ namespace rascl_hardware_interface
  * @brief ros2_control system interface for the RASCL EtherCAT drives.
  *
  * The interface uses SOEM to configure the drives, home each joint, and operate
- * them in CiA 402 Profile Position mode. Joint configuration, conversion
- * factors, profile parameters, and optional position limits are read from the
+ * them in CiA 402 Cyclic Synchronous Position mode. Joint configuration,
+ * conversion factors, and optional position limits are read from the
  * robot's ros2_control URDF section.
  */
 class RasclHardwareInterface : public hardware_interface::SystemInterface
@@ -46,7 +46,7 @@ public:
     const rclcpp_lifecycle::State & previous_state) override;
 
   /**
-   * @brief Enable and home all drives, then select Profile Position mode.
+   * @brief Enable and home all drives, then select CSP mode.
    * @param previous_state Lifecycle state before activation.
    * @return SUCCESS when every drive is homed and enabled; otherwise ERROR.
    * @warning This method can move the physical robot.
@@ -77,7 +77,7 @@ public:
   std::vector<hardware_interface::CommandInterface> export_command_interfaces() override;
 
   /**
-   * @brief Read status words and actual positions from all drives using SDOs.
+   * @brief Receive status words and actual positions from all drives using TxPDOs.
    * @param time Current controller time; currently unused.
    * @param period Time since the previous cycle, used to estimate velocity.
    * @return OK after all reads succeed; otherwise ERROR.
@@ -87,13 +87,12 @@ public:
     const rclcpp::Duration & period) override;
 
   /**
-   * @brief Validate, limit, convert, and send new position targets using SDOs.
+   * @brief Validate, limit, convert, and send position targets using RxPDOs.
    * @param time Current controller time; currently unused.
    * @param period Time since the previous cycle; currently unused.
    * @return OK after all required writes succeed; otherwise ERROR.
    *
-   * A new Profile Position target is sent only after the previous target has
-   * been reached. Commands outside configured URDF limits are clamped.
+   * Commands outside configured URDF limits are clamped.
    */
   hardware_interface::return_type write(
     const rclcpp::Time & time,
@@ -105,6 +104,8 @@ private:
   bool ethercat_operational_{false};
   ecx_contextt ethercat_context_{};
   std::string adapter_;
+  std::vector<uint8_t> io_map_;
+  int expected_work_counter_{0};
 
   // ros2_control state and command values, indexed in URDF joint order.
   std::vector<double> hw_positions_;
@@ -121,13 +122,6 @@ private:
   // Per-joint EtherCAT addressing and drive configuration.
   std::vector<uint16_t> slave_ids_;
   std::vector<double> drive_units_per_radian_;
-  std::vector<uint32_t> profile_velocities_;
-  std::vector<uint32_t> profile_accelerations_;
-  std::vector<uint32_t> profile_decelerations_;
-  std::vector<int16_t> motion_profile_types_;
-
-  // Cached drive values used to suppress duplicates and enforce sequencing.
-  std::vector<int32_t> last_commanded_drive_units_;
   std::vector<uint16_t> last_status_words_;
 };
 

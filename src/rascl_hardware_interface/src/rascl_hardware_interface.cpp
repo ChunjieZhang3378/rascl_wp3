@@ -4,6 +4,7 @@
 #include <chrono>
 #include <cmath>
 #include <cstdint>
+#include <cstring>
 #include <exception>
 #include <limits>
 #include <string>
@@ -27,14 +28,23 @@ constexpr uint16_t kOperationMode = 0x6060;
 constexpr uint16_t kOperationModeDisplay = 0x6061;
 constexpr uint16_t kPositionActualValue = 0x6064;
 constexpr uint16_t kTargetPosition = 0x607A;
-constexpr uint16_t kProfileVelocity = 0x6081;
-constexpr uint16_t kProfileAcceleration = 0x6083;
-constexpr uint16_t kProfileDeceleration = 0x6084;
-constexpr uint16_t kMotionProfileType = 0x6086;
 constexpr uint16_t kHomingMethod = 0x6098;
+constexpr uint16_t kRxPdoMapping = 0x1600;
+constexpr uint16_t kTxPdoMapping = 0x1A00;
+constexpr uint16_t kRxPdoAssignment = 0x1C12;
+constexpr uint16_t kTxPdoAssignment = 0x1C13;
+
+constexpr uint32_t kRxPdoControlWord = 0x60400010;
+constexpr uint32_t kRxPdoTargetPosition = 0x607A0020;
+constexpr uint32_t kRxPdoOperationMode = 0x60600008;
+constexpr uint32_t kTxPdoStatusWord = 0x60410010;
+constexpr uint32_t kTxPdoActualPosition = 0x60640020;
+constexpr uint32_t kTxPdoOperationModeDisplay = 0x60610008;
+constexpr size_t kCspPdoSize = 7;
+constexpr size_t kIoMapSize = 4096;
 
 constexpr int8_t kHomingMode = 6;
-constexpr int8_t kProfilePositionMode = 1;
+constexpr int8_t kCyclicSynchronousPositionMode = 8;
 constexpr int8_t kHomingMethodRisingEdgeTop = 28;
 constexpr int8_t kHomingMethodEndEffector = 37;
 constexpr uint16_t kControlEnableVoltage = 0x0006;
@@ -44,7 +54,6 @@ constexpr uint16_t kControlFaultReset = 0x0080;
 constexpr uint16_t kControlStartMotion = 0x001F;
 constexpr uint16_t kControlDisableVoltage = 0x0000;
 constexpr uint16_t kStatusFault = 0x0008;
-constexpr uint16_t kStatusTargetReached = 0x0400;
 constexpr uint16_t kStatusHomingAttained = 0x1000;
 constexpr uint16_t kStatusHomingError = 0x2000;
 constexpr auto kHomingTimeout = std::chrono::seconds(30);
@@ -75,11 +84,6 @@ hardware_interface::CallbackReturn RasclHardwareInterface::on_init(
   command_limit_warning_active_.assign(joint_count, false);
   slave_ids_.resize(joint_count);
   drive_units_per_radian_.assign(joint_count, 1.0);
-  profile_velocities_.assign(joint_count, 80000);
-  profile_accelerations_.assign(joint_count, 160000);
-  profile_decelerations_.assign(joint_count, 160000);
-  motion_profile_types_.assign(joint_count, 1);
-  last_commanded_drive_units_.assign(joint_count, std::numeric_limits<int32_t>::min());
   last_status_words_.assign(joint_count, 0);
 
   // SOEM opens a raw Ethernet socket by interface name, so the adapter must
@@ -110,29 +114,6 @@ hardware_interface::CallbackReturn RasclHardwareInterface::on_init(
       return hardware_interface::CallbackReturn::ERROR;
     }
     drive_units_per_radian_[i] = std::stod(scale->second);
-
-    const auto profile_velocity = joint.parameters.find("profile_velocity");
-    if (profile_velocity != joint.parameters.end()) {
-      profile_velocities_[i] = static_cast<uint32_t>(std::stoul(profile_velocity->second));
-    }
-
-    const auto profile_acceleration = joint.parameters.find("profile_acceleration");
-    if (profile_acceleration != joint.parameters.end()) {
-      profile_accelerations_[i] =
-        static_cast<uint32_t>(std::stoul(profile_acceleration->second));
-    }
-
-    const auto profile_deceleration = joint.parameters.find("profile_deceleration");
-    if (profile_deceleration != joint.parameters.end()) {
-      profile_decelerations_[i] =
-        static_cast<uint32_t>(std::stoul(profile_deceleration->second));
-    }
-
-    const auto motion_profile_type = joint.parameters.find("motion_profile_type");
-    if (motion_profile_type != joint.parameters.end()) {
-      motion_profile_types_[i] =
-        static_cast<int16_t>(std::stoi(motion_profile_type->second));
-    }
 
     if (joint.command_interfaces.size() != 1 ||
       joint.command_interfaces[0].name != hardware_interface::HW_IF_POSITION)
@@ -226,8 +207,6 @@ hardware_interface::CallbackReturn RasclHardwareInterface::on_configure(
     return hardware_interface::CallbackReturn::ERROR;
   }
 
-  // Configure distributed clocks when supported by the connected slaves.
-  ecx_configdc(&ethercat_context_);
   ethercat_initialized_ = true;
 
   // SDO configuration is performed in PRE-OP, before cyclic operation starts.
@@ -267,24 +246,130 @@ hardware_interface::CallbackReturn RasclHardwareInterface::on_configure(
         joint_name.c_str());
     }
 
-    last_commanded_drive_units_[i] = std::numeric_limits<int32_t>::min();
+    uint8_t number_of_entries = 0;
+    uint16_t pdo_mapping = kRxPdoMapping;
+    const uint32_t rx_entries[] = {
+      kRxPdoControlWord, kRxPdoTargetPosition, kRxPdoOperationMode};
+
+    if (ecx_SDOwrite(
+        &ethercat_context_, slave, kRxPdoAssignment, 0x00, FALSE,
+        sizeof(number_of_entries), &number_of_entries, EC_TIMEOUTRXM) <= 0 ||
+      ecx_SDOwrite(
+        &ethercat_context_, slave, kRxPdoMapping, 0x00, FALSE,
+        sizeof(number_of_entries), &number_of_entries, EC_TIMEOUTRXM) <= 0)
+    {
+      RCLCPP_ERROR(kLogger, "Failed to clear RxPDO mapping for joint '%s'", joint_name.c_str());
+      return hardware_interface::CallbackReturn::ERROR;
+    }
+
+    for (uint8_t entry = 0; entry < 3; ++entry) {
+      if (ecx_SDOwrite(
+          &ethercat_context_, slave, kRxPdoMapping, entry + 1, FALSE,
+          sizeof(rx_entries[entry]), &rx_entries[entry], EC_TIMEOUTRXM) <= 0)
+      {
+        RCLCPP_ERROR(kLogger, "Failed to map RxPDO for joint '%s'", joint_name.c_str());
+        return hardware_interface::CallbackReturn::ERROR;
+      }
+    }
+
+    number_of_entries = 3;
+    if (ecx_SDOwrite(
+        &ethercat_context_, slave, kRxPdoMapping, 0x00, FALSE,
+        sizeof(number_of_entries), &number_of_entries, EC_TIMEOUTRXM) <= 0)
+    {
+      RCLCPP_ERROR(kLogger, "Failed to enable RxPDO mapping for joint '%s'", joint_name.c_str());
+      return hardware_interface::CallbackReturn::ERROR;
+    }
+
+    number_of_entries = 1;
+    if (ecx_SDOwrite(
+        &ethercat_context_, slave, kRxPdoAssignment, 0x01, FALSE,
+        sizeof(pdo_mapping), &pdo_mapping, EC_TIMEOUTRXM) <= 0 ||
+      ecx_SDOwrite(
+        &ethercat_context_, slave, kRxPdoAssignment, 0x00, FALSE,
+        sizeof(number_of_entries), &number_of_entries, EC_TIMEOUTRXM) <= 0)
+    {
+      RCLCPP_ERROR(kLogger, "Failed to assign RxPDO for joint '%s'", joint_name.c_str());
+      return hardware_interface::CallbackReturn::ERROR;
+    }
+
+    number_of_entries = 0;
+    pdo_mapping = kTxPdoMapping;
+    const uint32_t tx_entries[] = {
+      kTxPdoStatusWord, kTxPdoActualPosition, kTxPdoOperationModeDisplay};
+
+    if (ecx_SDOwrite(
+        &ethercat_context_, slave, kTxPdoAssignment, 0x00, FALSE,
+        sizeof(number_of_entries), &number_of_entries, EC_TIMEOUTRXM) <= 0 ||
+      ecx_SDOwrite(
+        &ethercat_context_, slave, kTxPdoMapping, 0x00, FALSE,
+        sizeof(number_of_entries), &number_of_entries, EC_TIMEOUTRXM) <= 0)
+    {
+      RCLCPP_ERROR(kLogger, "Failed to clear TxPDO mapping for joint '%s'", joint_name.c_str());
+      return hardware_interface::CallbackReturn::ERROR;
+    }
+
+    for (uint8_t entry = 0; entry < 3; ++entry) {
+      if (ecx_SDOwrite(
+          &ethercat_context_, slave, kTxPdoMapping, entry + 1, FALSE,
+          sizeof(tx_entries[entry]), &tx_entries[entry], EC_TIMEOUTRXM) <= 0)
+      {
+        RCLCPP_ERROR(kLogger, "Failed to map TxPDO for joint '%s'", joint_name.c_str());
+        return hardware_interface::CallbackReturn::ERROR;
+      }
+    }
+
+    number_of_entries = 3;
+    if (ecx_SDOwrite(
+        &ethercat_context_, slave, kTxPdoMapping, 0x00, FALSE,
+        sizeof(number_of_entries), &number_of_entries, EC_TIMEOUTRXM) <= 0)
+    {
+      RCLCPP_ERROR(kLogger, "Failed to enable TxPDO mapping for joint '%s'", joint_name.c_str());
+      return hardware_interface::CallbackReturn::ERROR;
+    }
+
+    number_of_entries = 1;
+    if (ecx_SDOwrite(
+        &ethercat_context_, slave, kTxPdoAssignment, 0x01, FALSE,
+        sizeof(pdo_mapping), &pdo_mapping, EC_TIMEOUTRXM) <= 0 ||
+      ecx_SDOwrite(
+        &ethercat_context_, slave, kTxPdoAssignment, 0x00, FALSE,
+        sizeof(number_of_entries), &number_of_entries, EC_TIMEOUTRXM) <= 0)
+    {
+      RCLCPP_ERROR(kLogger, "Failed to assign TxPDO for joint '%s'", joint_name.c_str());
+      return hardware_interface::CallbackReturn::ERROR;
+    }
   }
 
-  // Request OPERATIONAL for process-data-capable devices. This implementation
-  // continues through mailbox SDO access if the group does not reach OP.
+  io_map_.assign(kIoMapSize, 0);
+  const int mapped_bytes = ecx_config_map_group(&ethercat_context_, io_map_.data(), 0);
+  if (mapped_bytes <= 0 || static_cast<size_t>(mapped_bytes) > io_map_.size()) {
+    RCLCPP_ERROR(kLogger, "Failed to create EtherCAT process-data map");
+    return hardware_interface::CallbackReturn::ERROR;
+  }
+
+  ecx_configdc(&ethercat_context_);
+  expected_work_counter_ =
+    ethercat_context_.grouplist[0].outputsWKC * 2 +
+    ethercat_context_.grouplist[0].inputsWKC;
+
   const int safe_op_state = ecx_statecheck(
     &ethercat_context_, 0, EC_STATE_SAFE_OP, EC_TIMEOUTSTATE);
-  if ((safe_op_state & EC_STATE_SAFE_OP) != 0) {
-    ethercat_context_.slavelist[0].state = EC_STATE_OPERATIONAL;
-    ecx_writestate(&ethercat_context_, 0);
+  if ((safe_op_state & EC_STATE_SAFE_OP) == 0) {
+    RCLCPP_ERROR(kLogger, "EtherCAT slaves did not reach SAFE-OP");
+    return hardware_interface::CallbackReturn::ERROR;
+  }
 
-    const int reached_state = ecx_statecheck(
-      &ethercat_context_, 0, EC_STATE_OPERATIONAL, EC_TIMEOUTSTATE);
-    if ((reached_state & EC_STATE_OPERATIONAL) == 0) {
-      RCLCPP_WARN(kLogger, "EtherCAT slaves did not reach OPERATIONAL; continuing with SDO access");
-    }
-  } else {
-    RCLCPP_WARN(kLogger, "EtherCAT slaves did not reach SAFE-OP; continuing with SDO access");
+  ecx_send_processdata(&ethercat_context_);
+  ecx_receive_processdata(&ethercat_context_, EC_TIMEOUTRET);
+  ethercat_context_.slavelist[0].state = EC_STATE_OPERATIONAL;
+  ecx_writestate(&ethercat_context_, 0);
+
+  const int reached_state = ecx_statecheck(
+    &ethercat_context_, 0, EC_STATE_OPERATIONAL, EC_TIMEOUTSTATE);
+  if ((reached_state & EC_STATE_OPERATIONAL) == 0) {
+    RCLCPP_ERROR(kLogger, "EtherCAT slaves did not reach OPERATIONAL");
+    return hardware_interface::CallbackReturn::ERROR;
   }
 
   ethercat_operational_ = true;
@@ -577,7 +662,7 @@ hardware_interface::CallbackReturn RasclHardwareInterface::on_activate(
     return hardware_interface::CallbackReturn::ERROR;
   }
 
-  // Stage 3: leave Homing mode, configure Profile Position parameters, and
+  // Stage 3: leave Homing mode, select Cyclic Synchronous Position mode, and
   // synchronize the ROS command with the measured post-homing position.
   for (auto i = 0u; i < slave_ids_.size(); ++i) {
     const auto slave = slave_ids_[i];
@@ -611,75 +696,35 @@ hardware_interface::CallbackReturn RasclHardwareInterface::on_activate(
       return hardware_interface::CallbackReturn::ERROR;
     }
 
-    int8_t mode = kProfilePositionMode;
+    int8_t mode = kCyclicSynchronousPositionMode;
     if (ecx_SDOwrite(
         &ethercat_context_, slave, kOperationMode, 0x00, FALSE, sizeof(mode), &mode,
         EC_TIMEOUTRXM) <= 0)
     {
       RCLCPP_ERROR(
-        kLogger, "Failed to set profile position mode for joint '%s'", joint_name.c_str());
+        kLogger, "Failed to set CSP mode for joint '%s'", joint_name.c_str());
       return hardware_interface::CallbackReturn::ERROR;
     }
 
     int8_t mode_display = 0;
     int size = sizeof(mode_display);
-    bool confirmed_profile_position_mode = false;
+    bool confirmed_csp_mode = false;
     for (int attempt = 0; attempt < 50; ++attempt) {
       mode_display = 0;
       size = sizeof(mode_display);
       if (ecx_SDOread(
           &ethercat_context_, slave, kOperationModeDisplay, 0x00, FALSE, &size,
-          &mode_display, EC_TIMEOUTRXM) > 0 && mode_display == kProfilePositionMode)
+          &mode_display, EC_TIMEOUTRXM) > 0 &&
+        mode_display == kCyclicSynchronousPositionMode)
       {
-        confirmed_profile_position_mode = true;
+        confirmed_csp_mode = true;
         break;
       }
     }
-    if (!confirmed_profile_position_mode) {
+    if (!confirmed_csp_mode) {
       RCLCPP_WARN(
-        kLogger, "Joint '%s' did not confirm mode 0x6061 = 1, continuing activation",
+        kLogger, "Joint '%s' did not confirm mode 0x6061 = 8, continuing activation",
         joint_name.c_str());
-    }
-
-    // Profile settings are written once during activation.
-    uint32_t profile_velocity = profile_velocities_[i];
-    if (ecx_SDOwrite(
-        &ethercat_context_, slave, kProfileVelocity, 0x00, FALSE, sizeof(profile_velocity),
-        &profile_velocity, EC_TIMEOUTRXM) <= 0)
-    {
-      RCLCPP_WARN(
-        kLogger, "Failed to set profile velocity 0x6081=%u for joint '%s'; continuing",
-        profile_velocity, joint_name.c_str());
-    }
-
-    uint32_t profile_acceleration = profile_accelerations_[i];
-    if (ecx_SDOwrite(
-        &ethercat_context_, slave, kProfileAcceleration, 0x00, FALSE,
-        sizeof(profile_acceleration), &profile_acceleration, EC_TIMEOUTRXM) <= 0)
-    {
-      RCLCPP_WARN(
-        kLogger, "Failed to set profile acceleration 0x6083=%u for joint '%s'; continuing",
-        profile_acceleration, joint_name.c_str());
-    }
-
-    uint32_t profile_deceleration = profile_decelerations_[i];
-    if (ecx_SDOwrite(
-        &ethercat_context_, slave, kProfileDeceleration, 0x00, FALSE,
-        sizeof(profile_deceleration), &profile_deceleration, EC_TIMEOUTRXM) <= 0)
-    {
-      RCLCPP_WARN(
-        kLogger, "Failed to set profile deceleration 0x6084=%u for joint '%s'; continuing",
-        profile_deceleration, joint_name.c_str());
-    }
-
-    int16_t motion_profile_type = motion_profile_types_[i];
-    if (ecx_SDOwrite(
-        &ethercat_context_, slave, kMotionProfileType, 0x00, FALSE,
-        sizeof(motion_profile_type), &motion_profile_type, EC_TIMEOUTRXM) <= 0)
-    {
-      RCLCPP_WARN(
-        kLogger, "Failed to set motion profile type 0x6086=%d for joint '%s'; continuing",
-        motion_profile_type, joint_name.c_str());
     }
 
     int32_t actual_position = 0;
@@ -738,7 +783,26 @@ hardware_interface::CallbackReturn RasclHardwareInterface::on_activate(
       joint_name.c_str(), status_word, hw_positions_[i]);
 
     last_status_words_[i] = status_word;
-    last_commanded_drive_units_[i] = std::numeric_limits<int32_t>::min();
+
+    uint8_t * outputs = ethercat_context_.slavelist[slave].outputs;
+    if (outputs == nullptr || ethercat_context_.slavelist[slave].Obytes < kCspPdoSize) {
+      RCLCPP_ERROR(kLogger, "Invalid RxPDO for joint '%s'", joint_name.c_str());
+      return hardware_interface::CallbackReturn::ERROR;
+    }
+    mode = kCyclicSynchronousPositionMode;
+    std::memcpy(outputs, &control_word, sizeof(control_word));
+    std::memcpy(outputs + sizeof(control_word), &target_position, sizeof(target_position));
+    std::memcpy(
+      outputs + sizeof(control_word) + sizeof(target_position), &mode, sizeof(mode));
+  }
+
+  ecx_send_processdata(&ethercat_context_);
+  const int work_counter = ecx_receive_processdata(&ethercat_context_, EC_TIMEOUTRET);
+  if (work_counter < expected_work_counter_) {
+    RCLCPP_ERROR(
+      kLogger, "Failed to start CSP process data: WKC %d, expected %d",
+      work_counter, expected_work_counter_);
+    return hardware_interface::CallbackReturn::ERROR;
   }
 
   return hardware_interface::CallbackReturn::SUCCESS;
@@ -775,6 +839,8 @@ hardware_interface::CallbackReturn RasclHardwareInterface::on_cleanup(
 
   ethercat_initialized_ = false;
   ethercat_operational_ = false;
+  io_map_.clear();
+  expected_work_counter_ = 0;
   return hardware_interface::CallbackReturn::SUCCESS;
 }
 
@@ -820,29 +886,33 @@ hardware_interface::return_type RasclHardwareInterface::read(
     return hardware_interface::return_type::ERROR;
   }
 
+  const int work_counter = ecx_receive_processdata(&ethercat_context_, EC_TIMEOUTRET);
+  if (work_counter < expected_work_counter_) {
+    RCLCPP_ERROR(
+      kLogger, "Incomplete EtherCAT process data: WKC %d, expected %d",
+      work_counter, expected_work_counter_);
+    return hardware_interface::return_type::ERROR;
+  }
+
   for (auto i = 0u; i < hw_positions_.size(); ++i) {
     const auto slave = slave_ids_[i];
-    const auto & joint_name = info_.joints[i].name;
     uint16_t status_word = 0;
     int32_t actual_position = 0;
-    int size = sizeof(status_word);
-
-    // Mailbox reads are synchronous.
-    if (ecx_SDOread(
-        &ethercat_context_, slave, kStatusWord, 0x00, FALSE, &size, &status_word,
-        EC_TIMEOUTRXM) <= 0)
-    {
-      RCLCPP_ERROR(kLogger, "Failed to read statusword for joint '%s'", joint_name.c_str());
+    int8_t mode_display = 0;
+    const uint8_t * inputs = ethercat_context_.slavelist[slave].inputs;
+    if (inputs == nullptr || ethercat_context_.slavelist[slave].Ibytes < kCspPdoSize) {
+      RCLCPP_ERROR(kLogger, "Invalid TxPDO for joint '%s'", info_.joints[i].name.c_str());
       return hardware_interface::return_type::ERROR;
     }
-
-    size = sizeof(actual_position);
-    if (ecx_SDOread(
-        &ethercat_context_, slave, kPositionActualValue, 0x00, FALSE, &size,
-        &actual_position, EC_TIMEOUTRXM) <= 0)
-    {
+    std::memcpy(&status_word, inputs, sizeof(status_word));
+    std::memcpy(&actual_position, inputs + sizeof(status_word), sizeof(actual_position));
+    std::memcpy(
+      &mode_display, inputs + sizeof(status_word) + sizeof(actual_position),
+      sizeof(mode_display));
+    if (mode_display != kCyclicSynchronousPositionMode) {
       RCLCPP_ERROR(
-        kLogger, "Failed to read actual position for joint '%s'", joint_name.c_str());
+        kLogger, "Joint '%s' left CSP mode: 0x6061 = %d",
+        info_.joints[i].name.c_str(), mode_display);
       return hardware_interface::return_type::ERROR;
     }
 
@@ -905,11 +975,6 @@ hardware_interface::return_type RasclHardwareInterface::write(
     }
     const int32_t target_position = static_cast<int32_t>(std::llround(target_drive_units));
 
-    // Avoid redundant mailbox traffic when the controller repeats a command.
-    if (target_position == last_commanded_drive_units_[i]) {
-      continue;
-    }
-
     if ((last_status_words_[i] & kStatusFault) != 0) {
       RCLCPP_ERROR(
         kLogger, "Refusing command for joint '%s' because last statusword is fault: 0x%04X",
@@ -917,56 +982,22 @@ hardware_interface::return_type RasclHardwareInterface::write(
       return hardware_interface::return_type::ERROR;
     }
 
-    // Profile Position mode treats each accepted command as a complete move.
-    const bool has_active_profile_target =
-      last_commanded_drive_units_[i] != std::numeric_limits<int32_t>::min();
-    if (has_active_profile_target && (last_status_words_[i] & kStatusTargetReached) == 0) {
-      continue;
-    }
-
     const auto slave = slave_ids_[i];
     const auto & joint_name = info_.joints[i].name;
-    if (ecx_SDOwrite(
-        &ethercat_context_, slave, kTargetPosition, 0x00, FALSE, sizeof(target_position),
-        &target_position, EC_TIMEOUTRXM) <= 0)
-    {
-      RCLCPP_ERROR(kLogger, "Failed to write target position for joint '%s'", joint_name.c_str());
+    uint8_t * outputs = ethercat_context_.slavelist[slave].outputs;
+    if (outputs == nullptr || ethercat_context_.slavelist[slave].Obytes < kCspPdoSize) {
+      RCLCPP_ERROR(kLogger, "Invalid RxPDO for joint '%s'", joint_name.c_str());
       return hardware_interface::return_type::ERROR;
     }
-
-    // Generate a rising edge on controlword bit 4: clear new-setpoint, set it,
-    // then clear it again so the next target can create another edge.
-    uint16_t control_word = kControlEnableOperation;
-    if (ecx_SDOwrite(
-        &ethercat_context_, slave, kControlWord, 0x00, FALSE, sizeof(control_word),
-        &control_word, EC_TIMEOUTRXM) <= 0)
-    {
-      RCLCPP_ERROR(kLogger, "Failed to clear start motion bit for joint '%s'", joint_name.c_str());
-      return hardware_interface::return_type::ERROR;
-    }
-
-    control_word = kControlStartMotion;
-    if (ecx_SDOwrite(
-        &ethercat_context_, slave, kControlWord, 0x00, FALSE, sizeof(control_word),
-        &control_word, EC_TIMEOUTRXM) <= 0)
-    {
-      RCLCPP_ERROR(kLogger, "Failed to start motion for joint '%s'", joint_name.c_str());
-      return hardware_interface::return_type::ERROR;
-    }
-
-    control_word = kControlEnableOperation;
-    if (ecx_SDOwrite(
-        &ethercat_context_, slave, kControlWord, 0x00, FALSE, sizeof(control_word),
-        &control_word, EC_TIMEOUTRXM) <= 0)
-    {
-      RCLCPP_ERROR(
-        kLogger, "Failed to clear start motion bit after starting joint '%s'",
-        joint_name.c_str());
-      return hardware_interface::return_type::ERROR;
-    }
-
-    last_commanded_drive_units_[i] = target_position;
+    const uint16_t control_word = kControlEnableOperation;
+    const int8_t mode = kCyclicSynchronousPositionMode;
+    std::memcpy(outputs, &control_word, sizeof(control_word));
+    std::memcpy(outputs + sizeof(control_word), &target_position, sizeof(target_position));
+    std::memcpy(
+      outputs + sizeof(control_word) + sizeof(target_position), &mode, sizeof(mode));
   }
+
+  ecx_send_processdata(&ethercat_context_);
 
   return hardware_interface::return_type::OK;
 }
