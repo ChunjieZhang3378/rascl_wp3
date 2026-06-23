@@ -19,7 +19,12 @@ JOINT_NAMES = (
     "lowerarm_joint",
     "end_effector_joint",
 )
-TRAJECTORY_FILES = ("cube_1.csv", "cube_2.csv", "cube_3.csv")
+TRAJECTORY_FILES = (
+    "cube_1_to_goal.csv",
+    "cube_2_to_bottom.csv",
+    "cube_3_to_goal.csv",
+    "cube_2_to_goal.csv",
+)
 
 
 def minimum_jerk_segment(start, goal, duration, sample_period):
@@ -64,7 +69,7 @@ def minimum_jerk_segment(start, goal, duration, sample_period):
 
 
 class Task1Node(Node):
-    """Load, generate, save, and execute the three offline trajectories."""
+    """Load, generate, save, and execute the offline trajectory segments."""
 
     def __init__(self):
         super().__init__("wp3_tsk1")
@@ -235,7 +240,7 @@ class Task1Node(Node):
             previous_time = time_from_start
 
     def run(self):
-        """Generate and execute cube 1, cube 2, then cube 3."""
+        """Generate and execute the configured trajectory segments in order."""
         generated_trajectories = []
         for filename in TRAJECTORY_FILES:
             input_path = self.input_directory / filename
@@ -253,7 +258,9 @@ class Task1Node(Node):
             self.get_logger().info("Simulation preview mode: publishing trajectories to RViz")
             for filename, trajectory in generated_trajectories:
                 self.preview_trajectory(trajectory, filename)
-            self.get_logger().info("Task 1 preview completed: cube 1, cube 2, cube 3")
+            self.get_logger().info(
+                f"Task 1 preview completed: {', '.join(TRAJECTORY_FILES)}"
+            )
             return
 
         self.get_logger().info("Waiting for joint trajectory controller")
@@ -261,7 +268,7 @@ class Task1Node(Node):
             raise RuntimeError("joint trajectory controller action is unavailable")
         for filename, trajectory in generated_trajectories:
             self.execute_trajectory(trajectory, filename)
-        self.get_logger().info("Task 1 completed: cube 1, cube 2, cube 3")
+        self.get_logger().info(f"Task 1 completed: {', '.join(TRAJECTORY_FILES)}")
 
 
 def main(args=None):
