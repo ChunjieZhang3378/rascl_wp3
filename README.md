@@ -200,22 +200,65 @@ ros2 action send_goal /joint_trajectory_controller/follow_joint_trajectory \
 Before sending motion commands, make sure the robot has clearance, the power
 supply is current-limited appropriately, and nobody is backdriving the motors.
 
-## wp3
+## WP3 commands for task 1 and 2
 Allow the container to open GUI windows on the host:
 ```bash
 xhost +local:root
 ```
+Lauch files for simulation tests
 
+```bash
+ros2 launch rascl_wp3_ss26_group16 wp3_tsk1_sim.launch.py
+ros2 launch rascl_wp3_ss26_group16 wp3_tsk2_sim.launch.py
+```
+
+In terminal 1:
 Launch arm
 ```bash
 ldconfig
 ros2 launch rascl_description ros2_control.launch.py
 ```
 
-ros2 launch rascl_description display.launch.py
-
-Launch task 1 in sim/real
+For task 1, place the cube 1 with the position r, theta =23cm, -0.75 , cube 2 and 3 at position r, theta = 17cm, 0.0rad
+In terminal 2:
+Open container and launch task 1 in real
 ```bash
-ros2 launch rascl_wp3_ss26_group16 wp3_tsk1_sim.launch.py
+docker exec -it rascl-wp3-gruppe16 bash
+rossetup
+
 ros2 launch rascl_wp3_ss26_group16 wp3_tsk1.launch.py
+```
+
+For task 2, place the cubes anywhere whitn the feasible raadius range (0.11cm, 0.19cm)
+In terminal 2:
+Open container and launch task 2 in real
+```bash
+docker exec -it rascl-wp3-gruppe16 bash
+rossetup
+
+ros2 launch rascl_wp3_ss26_group16 wp3_tsk2.launch.py
+```
+In terminal 3:
+Open container
+```bash
+docker exec -it rascl-wp3-gruppe16 bash
+rossetup
+```
+
+
+Publish cube position in cylindrical
+x: radius of the cube position. Possible positions are: {0.11, 0.15, 0.19}
+y: angel
+z: height
+```bash
+ros2 topic pub --once /cube_pose_cylindrical geometry_msgs/msg/Point \
+  "{x: 0.15, y: 0.75, z: 0.03}"
+```
+
+
+
+or publish cube position in x,y,z
+```bash
+ros2 topic pub --once /goal_poses geometry_msgs/msg/Point \
+  "{x: 0.15, y: 0.15, z: 0.03}"
 ```

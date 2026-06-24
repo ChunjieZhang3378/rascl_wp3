@@ -1,5 +1,61 @@
 wp3_tsk2:
   ros__parameters:
-    goal_pose_topic: "/goal_poses"
-    minimum_feasible_radius: 0.0  # TODO: determine experimentally
-    maximum_feasible_radius: 0.0  # TODO: determine experimentally
+    # Tutor/task-sheet input: Cartesian geometry_msgs/msg/Point.
+    cartesian_cube_topic: "/goal_poses"
+    # Optional convenience input: Point fields mean (r, theta, z).
+    cylindrical_cube_topic: "/cube_pose_cylindrical"
+    # Cartesian pose republished after conversion from the internal (r, theta, z).
+    goal_pose_topic: "/goal_pose"
+
+    trajectory_action: "/joint_trajectory_controller/follow_joint_trajectory"
+    joint_state_topic: "/joint_states"
+    sample_period: 0.02
+    # Duration of each minimum-jerk waypoint transition.
+    segment_duration: 4.0
+    simulate_only: false
+
+    # Max/min values of  feasible radius from tobot base
+    minimum_feasible_radius: 0.11
+    maximum_feasible_radius: 0.19
+    minimum_theta: -1.570796327
+    maximum_theta: 1.570796327
+
+    # Fixed known goal on the robot's right side. With shoulder_sign=-1,
+    # target_theta=-1.5 commands shoulder_joint=+1.5 rad.
+    target_theta: -1.5
+    # Cube is 41 mm high, so its center is 20.5 mm above the plate.
+    # This assumes the box-plate surface is z=0 in base_link.
+    target_z: 0.0205
+    cube_height: 0.041
+    # End-effector midpoint is 15 mm above the cube top-center point.
+    grasp_offset_above_cube_top: 0.015
+    approach_height: 0.08
+
+    # Dimensions
+    # Shoulder pitch axis: 57.441 mm + 65.560 mm above base_link.
+    shoulder_height: 0.123001
+    # Planar axis distances: hypot(170, 80) mm and 129.09 mm.
+    upperarm_length: 0.1878829423
+    lowerarm_length: 0.12909
+
+    # The repository currently has a placeholder cuboid gripper. Replace these
+    # zeros with the wrist-axis-to-contact-point offset of the final gripper.
+    radial_tool_offset: 0.0
+    vertical_tool_offset: 0.0
+    # This branch matches the arm's folded mechanical-zero configuration.
+    elbow_up: true
+
+    # Joint-coordinate mapping for the current URDF axis conventions.
+    shoulder_sign: -1.0
+    shoulder_offset: 0.0
+    upperarm_sign: 1.0
+    # At motor zero, the upper link is 1.11773 rad above the radial plane.
+    upperarm_offset: -1.1177305070
+    lowerarm_sign: -1.0
+    # Relative geometric elbow angle at motor zero is -1.11694 rad.
+    lowerarm_offset: -1.1169401780
+
+    # Same end-effector commands currently used by Task 1.
+    gripper_open_position: 1.0
+    gripper_closed_position: 2.5
+    home_positions: [0.0, 0.0, 0.0, 1.0]
