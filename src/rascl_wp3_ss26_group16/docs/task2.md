@@ -16,26 +16,32 @@ online minimum-jerk segments for this sequence:
 3. lower to cube
 4. close gripper
 5. lift
-6. move above the known target
-7. lower to target
-8. open gripper
-9. retreat
-10. home
+6. return upper-arm and lower-arm joints to their initial positions
+7. rotate only the shoulder joint to the fixed goal angle
+8. extend above the known target
+9. lower to target
+10. open gripper
+11. retreat
+12. home
+
+During steps 6 and 7, the gripper remains closed. While folding, the shoulder
+stays at the cube angle. Shoulder rotation starts only after the upper-arm and
+lower-arm joints have reached their configured home positions.
 
 The fourth joint uses the same open/closed values as Task 1. Robot dimensions,
 joint signs/offsets, target position, feasible radii, approach height, and gripper
 values are calibration parameters in `config/task2.yaml`.
 
 The cube may arrive anywhere inside the feasible radial and angular region. The
-goal is fixed and known: it uses the maximum feasible radius and the configured
-right-side angle:
+goal is fixed and known: it uses the configured target radius and right-side
+angle:
 
 ```text
 cube:   (cube_radius, cube_theta, cube_z)
-target: (maximum_radius, target_theta, target_z)
+target: (target_radius, target_theta, target_z)
 ```
 
-The current configuration uses `maximum_radius=0.19 m` and
+The current configuration uses `target_radius=0.19 m` and
 `target_theta=-1.5 rad`. Because the URDF shoulder axis has the opposite sign,
 this produces a shoulder command of `+1.5 rad`, matching the right-side goal
 used by Task 1 while retaining margin from the `+π/2` joint limit.
@@ -130,3 +136,14 @@ ros2 launch rascl_wp3_ss26_group16 wp3_tsk2.launch.py
 Publish one cube centre at a time from a third sourced terminal. Valid messages
 are queued and executed sequentially. The current minimum-jerk segment duration
 is `4.0 s`.
+
+```bash
+ros2 topic pub --once /cube_pose_cylindrical geometry_msgs/msg/Point \
+  "{x: 0.13, y: 0.0, z: 0.03}"
+
+ros2 topic pub --once /cube_pose_cylindrical geometry_msgs/msg/Point \
+  "{x: 0.15, y: 0.78, z: 0.03}"
+
+ros2 topic pub --once /cube_pose_cylindrical geometry_msgs/msg/Point \
+  "{x: 0.21, y: -0.4, z: 0.03}"
+```

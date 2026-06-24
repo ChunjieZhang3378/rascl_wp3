@@ -10,8 +10,8 @@ rotation axis to the centre of the cube.
 - Nominal centre above the plate: `20.5 mm`
 
 The base collision mesh has an approximate radius of `80 mm`. At the minimum
-Task 2 cube-centre radius of `110 mm`, the nearest cube face is approximately
-`90 mm` from the base centre, leaving about `10 mm` radial clearance.
+Task 2 cube-centre radius of `130 mm`, the nearest cube face is approximately
+`110 mm` from the base centre, leaving about `30 mm` radial clearance.
 
 ## Task 1 placement
 
@@ -24,15 +24,15 @@ The cubes are moved individually and stacked at the goal in the order 1–2–3.
 
 ## Task 2 feasible region
 
-- Minimum cube-centre radius: `110 mm`
-- Maximum cube-centre radius: `190 mm`
+- Minimum cube-centre radius: `130 mm`
+- Maximum cube-centre radius: `210 mm`
 - Shoulder angular region: `-pi/2–pi/2 rad`
 - Fixed goal radius: `190 mm`
 - Fixed goal angle: `-1.5 rad`, on the robot's right side
 
-The minimum and maximum radii were selected as the working collision-free and
-reachable range for the current robot/gripper setup. The goal is placed at the
-maximum feasible radius as required by the task.
+The minimum and maximum radii define the working collision-free and reachable
+region for the current robot/gripper setup. The configured fixed goal is at a
+radius of `190 mm`.
 
 Cube faces must remain parallel to the gripper contact faces according to the
 box plate. Only one cube is present during each Task 2 cycle.

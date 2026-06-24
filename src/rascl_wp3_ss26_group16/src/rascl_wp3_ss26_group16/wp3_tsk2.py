@@ -74,10 +74,11 @@ class Task2Node(Node):
         self.declare_parameter("joint_state_topic", "/joint_states")
         self.declare_parameter("sample_period", 0.02)
         self.declare_parameter("segment_duration", 4.0)
-        self.declare_parameter("minimum_feasible_radius", 0.11)
-        self.declare_parameter("maximum_feasible_radius", 0.19)
+        self.declare_parameter("minimum_feasible_radius", 0.13)
+        self.declare_parameter("maximum_feasible_radius", 0.21)
         self.declare_parameter("minimum_theta", -math.pi / 2.0)
         self.declare_parameter("maximum_theta", math.pi / 2.0)
+        self.declare_parameter("target_radius", 0.19)
         self.declare_parameter("target_theta", -1.5)
         self.declare_parameter("target_z", 0.0205)
         self.declare_parameter("cube_height", 0.041)
@@ -110,6 +111,7 @@ class Task2Node(Node):
         )
         self.minimum_theta = float(self.get_parameter("minimum_theta").value)
         self.maximum_theta = float(self.get_parameter("maximum_theta").value)
+        self.target_radius = float(self.get_parameter("target_radius").value)
         self.target_theta = float(self.get_parameter("target_theta").value)
         self.target_z = float(self.get_parameter("target_z").value)
         self.cube_height = float(self.get_parameter("cube_height").value)
@@ -135,6 +137,8 @@ class Task2Node(Node):
             raise ValueError("minimum_theta must be smaller than maximum_theta")
         if not self.minimum_theta <= self.target_theta <= self.maximum_theta:
             raise ValueError("target_theta must be inside the feasible angular region")
+        if not self.minimum_radius <= self.target_radius <= self.maximum_radius:
+            raise ValueError("target_radius must be inside the feasible radial region")
 
         self.pending_cubes = deque()
         self.current_positions = None
@@ -259,7 +263,7 @@ class Task2Node(Node):
     def build_pick_and_place_waypoints(self, cube_pose):
         """Build the Task-1-style approach, grasp, lift, place, and home sequence."""
         cube_radius, cube_theta, cube_z = cube_pose
-        target_radius = self.maximum_radius
+        target_radius = self.target_radius
         target_theta = self.target_theta
         open_gripper = float(self.get_parameter("gripper_open_position").value)
         closed_gripper = float(self.get_parameter("gripper_closed_position").value)
@@ -272,32 +276,58 @@ class Task2Node(Node):
         cube_approach_z = cube_grasp_z + self.approach_height
         target_approach_z = target_grasp_z + self.approach_height
 
+        cube_approach_open = self.inverse_kinematics(
+            cube_radius, cube_theta, cube_approach_z, open_gripper
+        )
+        cube_grasp_open = self.inverse_kinematics(
+            cube_radius, cube_theta, cube_grasp_z, open_gripper
+        )
+        cube_grasp_closed = self.inverse_kinematics(
+            cube_radius, cube_theta, cube_grasp_z, closed_gripper
+        )
+        cube_approach_closed = self.inverse_kinematics(
+            cube_radius, cube_theta, cube_approach_z, closed_gripper
+        )
+        target_approach_closed = self.inverse_kinematics(
+            target_radius, target_theta, target_approach_z, closed_gripper
+        )
+        target_grasp_closed = self.inverse_kinematics(
+            target_radius, target_theta, target_grasp_z, closed_gripper
+        )
+        target_grasp_open = self.inverse_kinematics(
+            target_radius, target_theta, target_grasp_z, open_gripper
+        )
+        target_approach_open = self.inverse_kinematics(
+            target_radius, target_theta, target_approach_z, open_gripper
+        )
+
+        # Fold the upper and lower arm before rotating the shoulder. Keep the
+        # gripper closed and preserve the current shoulder angle while folding.
+        folded_at_cube = [
+            cube_approach_closed[0],
+            self.home_positions[1],
+            self.home_positions[2],
+            closed_gripper,
+        ]
+        folded_at_target = [
+            target_approach_closed[0],
+            self.home_positions[1],
+            self.home_positions[2],
+            closed_gripper,
+        ]
+
         return [
             self.home_positions,
-            self.inverse_kinematics(
-                cube_radius, cube_theta, cube_approach_z, open_gripper
-            ),
-            self.inverse_kinematics(
-                cube_radius, cube_theta, cube_grasp_z, open_gripper
-            ),
-            self.inverse_kinematics(
-                cube_radius, cube_theta, cube_grasp_z, closed_gripper
-            ),
-            self.inverse_kinematics(
-                cube_radius, cube_theta, cube_approach_z, closed_gripper
-            ),
-            self.inverse_kinematics(
-                target_radius, target_theta, target_approach_z, closed_gripper
-            ),
-            self.inverse_kinematics(
-                target_radius, target_theta, target_grasp_z, closed_gripper
-            ),
-            self.inverse_kinematics(
-                target_radius, target_theta, target_grasp_z, open_gripper
-            ),
-            self.inverse_kinematics(
-                target_radius, target_theta, target_approach_z, open_gripper
-            ),
+            cube_approach_open,
+            cube_grasp_open,
+            cube_grasp_closed,
+            cube_approach_closed,
+            folded_at_cube,
+            folded_at_target,
+            target_approach_closed,
+            target_grasp_closed,
+            target_grasp_open,
+            target_approach_open,
             self.home_positions,
         ]
 

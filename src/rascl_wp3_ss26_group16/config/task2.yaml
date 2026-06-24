@@ -15,13 +15,15 @@ wp3_tsk2:
     simulate_only: false
 
     # Max/min values of  feasible radius from tobot base
-    minimum_feasible_radius: 0.11
-    maximum_feasible_radius: 0.19
+    minimum_feasible_radius: 0.13
+    maximum_feasible_radius: 0.21
     minimum_theta: -1.570796327
     maximum_theta: 1.570796327
 
-    # Fixed known goal on the robot's right side. With shoulder_sign=-1,
-    # target_theta=-1.5 commands shoulder_joint=+1.5 rad.
+    # Fixed known goal on the robot's right side.
+    target_radius: 0.19
+    # With shoulder_sign=-1, target_theta=-1.5 commands
+    # shoulder_joint=+1.5 rad.
     target_theta: -1.5
     # Cube is 41 mm high, so its center is 20.5 mm above the plate.
     # This assumes the box-plate surface is z=0 in base_link.

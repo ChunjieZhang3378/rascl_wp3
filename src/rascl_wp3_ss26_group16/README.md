@@ -64,7 +64,7 @@ ros2 topic pub --once /goal_poses geometry_msgs/msg/Point \
 ```
 
 For `/goal_poses`, the fields are ordinary Cartesian `x`, `y`, and `z` values.
-The Cartesian radius `sqrt(x² + y²)` must be between `0.11 m` and `0.19 m`.
+The Cartesian radius `sqrt(x² + y²)` must be between `0.13 m` and `0.21 m`.
 
 ## Real robot
 
@@ -104,7 +104,7 @@ valid inputs and processes cubes sequentially.
 
 - Task 1 controller mode: CSP
 - Task 1 sample period: `0.02 s`
-- Task 2 feasible radius: `0.11–0.19 m`
+- Task 2 feasible radius: `0.13–0.21 m`
 - Task 2 feasible angle: `-pi/2–pi/2 rad`
 - Task 2 fixed goal: `r=0.19 m`, `theta=-1.5 rad`
 - Task 2 minimum-jerk segment duration: `4.0 s`
