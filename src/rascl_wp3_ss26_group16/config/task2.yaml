@@ -2,9 +2,7 @@ wp3_tsk2:
   ros__parameters:
     # Tutor/task-sheet input: Cartesian geometry_msgs/msg/Point.
     cartesian_cube_topic: "/goal_poses"
-    # Optional convenience input: Point fields mean (r, theta, z).
-    cylindrical_cube_topic: "/cube_pose_cylindrical"
-    # Cartesian pose republished after conversion from the internal (r, theta, z).
+    # Accepted Cartesian pose republished for visualization/consumers.
     goal_pose_topic: "/goal_pose"
 
     trajectory_action: "/joint_trajectory_controller/follow_joint_trajectory"
@@ -14,23 +12,23 @@ wp3_tsk2:
     segment_duration: 4.0
     simulate_only: false
 
-    # Max/min values of  feasible radius from tobot base
-    minimum_feasible_radius: 0.13
-    maximum_feasible_radius: 0.21
-    minimum_theta: -1.570796327
-    maximum_theta: 1.570796327
+    # Feasible Cartesian cube-position limits (metres).
+    # x: -250 to 250 mm; y: 30 to 250 mm.
+    minimum_x: -0.25
+    maximum_x: 0.25
+    minimum_y: 0.03
+    maximum_y: 0.25
 
-    # Fixed known goal on the robot's right side.
-    target_radius: 0.19
-    # With shoulder_sign=-1, target_theta=-1.5 commands
-    # shoulder_joint=+1.5 rad.
-    target_theta: -1.5
-    # Cube is 41 mm high, so its center is 20.5 mm above the plate.
-    # This assumes the box-plate surface is z=0 in base_link.
-    target_z: 0.0205
+    # Fixed target position: x=250 mm, y=30 mm.
+    target_x: 0.25
+    target_y: 0.03
+    # Fixed target cube-center height. For a 41 mm cube on the plate, the
+    # center is 20.5 mm above base_link z=0.
+    target_z: 0.035
     cube_height: 0.041
-    # End-effector midpoint is 15 mm above the cube top-center point.
-    grasp_offset_above_cube_top: 0.015
+    # TCP target relative to the cube center. Zero means the TCP should go to
+    # the cube center itself.
+    tcp_offset_from_cube_center_z: 0.025
     approach_height: 0.08
 
     # Dimensions
@@ -40,16 +38,18 @@ wp3_tsk2:
     upperarm_length: 0.1878829423
     lowerarm_length: 0.12909
 
-    # The repository currently has a placeholder cuboid gripper. Replace these
-    # zeros with the wrist-axis-to-contact-point offset of the final gripper.
+    # TCP at the center of the gripper: 30 mm below the end-effector midpoint
+    # along the tool's local vertical axis. The offset rotates with the tool.
     radial_tool_offset: 0.0
-    vertical_tool_offset: 0.0
+    vertical_tool_offset: -0.06
+    tool_pitch_offset: 0.0
     # This branch matches the arm's folded mechanical-zero configuration.
     elbow_up: true
 
     # Joint-coordinate mapping for the current URDF axis conventions.
     shoulder_sign: -1.0
-    shoulder_offset: 0.0
+    # The arm's zero direction is +y; offset by 90 degrees to use base_link x/y.
+    shoulder_offset: 1.570796327
     upperarm_sign: 1.0
     # At motor zero, the upper link is 1.11773 rad above the radial plane.
     upperarm_offset: -1.1177305070
@@ -58,6 +58,6 @@ wp3_tsk2:
     lowerarm_offset: -1.1169401780
 
     # Same end-effector commands currently used by Task 1.
-    gripper_open_position: 1.0
+    gripper_open_position: 0.0
     gripper_closed_position: 2.5
-    home_positions: [0.0, 0.0, 0.0, 1.0]
+    home_positions: [0.0, 0.0, 0.0, 0.0]

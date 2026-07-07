@@ -1,4 +1,4 @@
-"""Online cylindrical-pose pick-and-place planning for Task 2."""
+"""Online Cartesian cube-pose pick-and-place planning for Task 2."""
 
 import math
 import time
@@ -60,13 +60,56 @@ def solve_planar_ik(
     return upperarm, lowerarm
 
 
+def solve_tcp_planar_ik(
+    tcp_radius,
+    tcp_height,
+    shoulder_height,
+    upperarm_length,
+    lowerarm_length,
+    tool_forward_offset,
+    tool_vertical_offset,
+    elbow_up=False,
+    tool_pitch_offset=0.0,
+    iterations=3,
+):
+    """Solve IK for a TCP offset expressed in the local tool frame."""
+    wrist_radius = tcp_radius
+    wrist_height = tcp_height
+    upperarm = 0.0
+    lowerarm = 0.0
+
+    for _ in range(iterations):
+        upperarm, lowerarm = solve_planar_ik(
+            wrist_radius,
+            wrist_height,
+            shoulder_height,
+            upperarm_length,
+            lowerarm_length,
+            elbow_up,
+        )
+        tool_pitch = upperarm + lowerarm + tool_pitch_offset
+        radial_offset = (
+            tool_forward_offset * math.cos(tool_pitch)
+            - tool_vertical_offset * math.sin(tool_pitch)
+        )
+        vertical_offset = (
+            tool_forward_offset * math.sin(tool_pitch)
+            + tool_vertical_offset * math.cos(tool_pitch)
+        )
+        wrist_radius = tcp_radius - radial_offset
+        wrist_height = tcp_height - vertical_offset
+        if wrist_radius <= 0.0:
+            raise ValueError("tool offset places the wrist behind the robot base")
+
+    return upperarm, lowerarm
+
+
 class Task2Node(Node):
     """Receive cube poses, solve IK, and execute online pick-and-place motions."""
 
     def __init__(self):
         super().__init__("wp3_tsk2")
         self.declare_parameter("cartesian_cube_topic", "/goal_poses")
-        self.declare_parameter("cylindrical_cube_topic", "/cube_pose_cylindrical")
         self.declare_parameter("goal_pose_topic", "/goal_pose")
         self.declare_parameter(
             "trajectory_action", "/joint_trajectory_controller/follow_joint_trajectory"
@@ -74,21 +117,22 @@ class Task2Node(Node):
         self.declare_parameter("joint_state_topic", "/joint_states")
         self.declare_parameter("sample_period", 0.02)
         self.declare_parameter("segment_duration", 4.0)
-        self.declare_parameter("minimum_feasible_radius", 0.13)
-        self.declare_parameter("maximum_feasible_radius", 0.21)
-        self.declare_parameter("minimum_theta", -math.pi / 2.0)
-        self.declare_parameter("maximum_theta", math.pi / 2.0)
-        self.declare_parameter("target_radius", 0.19)
-        self.declare_parameter("target_theta", -1.5)
+        self.declare_parameter("minimum_x", -0.25)
+        self.declare_parameter("maximum_x", 0.25)
+        self.declare_parameter("minimum_y", 0.03)
+        self.declare_parameter("maximum_y", 0.25)
+        self.declare_parameter("target_x", 0.25)
+        self.declare_parameter("target_y", 0.03)
         self.declare_parameter("target_z", 0.0205)
         self.declare_parameter("cube_height", 0.041)
-        self.declare_parameter("grasp_offset_above_cube_top", 0.015)
+        self.declare_parameter("tcp_offset_from_cube_center_z", 0.0)
         self.declare_parameter("approach_height", 0.08)
         self.declare_parameter("shoulder_height", 0.123001)
         self.declare_parameter("upperarm_length", 0.1878829423)
         self.declare_parameter("lowerarm_length", 0.12909)
-        self.declare_parameter("radial_tool_offset", 0.0)
+        self.declare_parameter("radial_tool_offset", 0.03)
         self.declare_parameter("vertical_tool_offset", 0.0)
+        self.declare_parameter("tool_pitch_offset", 0.0)
         self.declare_parameter("shoulder_sign", -1.0)
         self.declare_parameter("shoulder_offset", 0.0)
         self.declare_parameter("upperarm_sign", 1.0)
@@ -96,27 +140,23 @@ class Task2Node(Node):
         self.declare_parameter("lowerarm_sign", -1.0)
         self.declare_parameter("lowerarm_offset", -1.1169401780)
         self.declare_parameter("elbow_up", True)
-        self.declare_parameter("gripper_open_position", 1.0)
+        self.declare_parameter("gripper_open_position", 0.0)
         self.declare_parameter("gripper_closed_position", 2.5)
-        self.declare_parameter("home_positions", [0.0, 0.0, 0.0, 1.0])
+        self.declare_parameter("home_positions", [0.0, 0.0, 0.0, 0.0])
         self.declare_parameter("simulate_only", False)
 
         self.sample_period = float(self.get_parameter("sample_period").value)
         self.segment_duration = float(self.get_parameter("segment_duration").value)
-        self.minimum_radius = float(
-            self.get_parameter("minimum_feasible_radius").value
-        )
-        self.maximum_radius = float(
-            self.get_parameter("maximum_feasible_radius").value
-        )
-        self.minimum_theta = float(self.get_parameter("minimum_theta").value)
-        self.maximum_theta = float(self.get_parameter("maximum_theta").value)
-        self.target_radius = float(self.get_parameter("target_radius").value)
-        self.target_theta = float(self.get_parameter("target_theta").value)
+        self.minimum_x = float(self.get_parameter("minimum_x").value)
+        self.maximum_x = float(self.get_parameter("maximum_x").value)
+        self.minimum_y = float(self.get_parameter("minimum_y").value)
+        self.maximum_y = float(self.get_parameter("maximum_y").value)
+        self.target_x = float(self.get_parameter("target_x").value)
+        self.target_y = float(self.get_parameter("target_y").value)
         self.target_z = float(self.get_parameter("target_z").value)
         self.cube_height = float(self.get_parameter("cube_height").value)
-        self.grasp_offset = float(
-            self.get_parameter("grasp_offset_above_cube_top").value
+        self.tcp_offset_from_cube_center_z = float(
+            self.get_parameter("tcp_offset_from_cube_center_z").value
         )
         self.approach_height = float(self.get_parameter("approach_height").value)
         self.simulate_only = bool(self.get_parameter("simulate_only").value)
@@ -127,18 +167,12 @@ class Task2Node(Node):
             raise ValueError("home_positions must contain four joint positions")
         if self.sample_period <= 0.0 or self.segment_duration <= 0.0:
             raise ValueError("sample_period and segment_duration must be positive")
-        if self.cube_height <= 0.0 or self.grasp_offset < 0.0:
-            raise ValueError(
-                "cube_height must be positive and grasp offset must be non-negative"
-            )
-        if not 0.0 < self.minimum_radius <= self.maximum_radius:
-            raise ValueError("configure positive and ordered feasible radii")
-        if not self.minimum_theta < self.maximum_theta:
-            raise ValueError("minimum_theta must be smaller than maximum_theta")
-        if not self.minimum_theta <= self.target_theta <= self.maximum_theta:
-            raise ValueError("target_theta must be inside the feasible angular region")
-        if not self.minimum_radius <= self.target_radius <= self.maximum_radius:
-            raise ValueError("target_radius must be inside the feasible radial region")
+        if self.cube_height <= 0.0:
+            raise ValueError("cube_height must be positive")
+        if not self.minimum_x < self.maximum_x:
+            raise ValueError("minimum_x must be smaller than maximum_x")
+        if not self.minimum_y < self.maximum_y:
+            raise ValueError("minimum_y must be smaller than maximum_y")
 
         self.pending_cubes = deque()
         self.current_positions = None
@@ -149,12 +183,6 @@ class Task2Node(Node):
             Point,
             str(self.get_parameter("cartesian_cube_topic").value),
             self._receive_cartesian_cube,
-            10,
-        )
-        self.create_subscription(
-            Point,
-            str(self.get_parameter("cylindrical_cube_topic").value),
-            self._receive_cylindrical_cube,
             10,
         )
         self.create_subscription(
@@ -178,30 +206,24 @@ class Task2Node(Node):
             )
 
     def _receive_cartesian_cube(self, message):
-        cylindrical_pose = cartesian_to_cylindrical(message)
-        self._queue_cube(cylindrical_pose)
-
-    def _receive_cylindrical_cube(self, message):
-        self._queue_cube((message.x, message.y, message.z))
-
-    def _queue_cube(self, cylindrical_pose):
-        radius, theta, height = cylindrical_pose
-        if not all(math.isfinite(value) for value in cylindrical_pose):
+        cartesian_pose = (message.x, message.y, message.z)
+        if not all(math.isfinite(value) for value in cartesian_pose):
             self.get_logger().error("Rejected cube pose containing a non-finite value")
             return
         try:
-            self.validate_cube_pose(radius, theta)
+            self.validate_cube_pose(message.x, message.y)
         except ValueError as error:
             self.get_logger().error(str(error))
             return
 
-        cartesian_pose = cylindrical_to_cartesian(radius, theta, height)
-        self.goal_pose_publisher.publish(cartesian_pose)
+        cylindrical_pose = cartesian_to_cylindrical(message)
+        radius, theta, height = cylindrical_pose
+        self.goal_pose_publisher.publish(message)
         self.pending_cubes.append(cylindrical_pose)
         self.get_logger().info(
-            f"Queued cube r={radius:.3f} m, theta={theta:.3f} rad, z={height:.3f} m; "
-            f"published Cartesian ({cartesian_pose.x:.3f}, "
-            f"{cartesian_pose.y:.3f}, {cartesian_pose.z:.3f})"
+            f"Queued Cartesian cube ({message.x:.3f}, {message.y:.3f}, "
+            f"{message.z:.3f}) m; internal r={radius:.3f} m, "
+            f"theta={theta:.3f} rad, z={height:.3f} m"
         )
 
     def _receive_joint_state(self, message):
@@ -211,37 +233,31 @@ class Task2Node(Node):
                 float(positions_by_name[name]) for name in JOINT_NAMES
             ]
 
-    def validate_cube_pose(self, radius, theta):
-        """Reject poses outside the documented collision-free feasible region."""
-        if not self.minimum_radius <= radius <= self.maximum_radius:
+    def validate_cube_pose(self, x, y):
+        """Reject Cartesian cube positions outside the configured x/y bounds."""
+        if not self.minimum_x <= x <= self.maximum_x:
             raise ValueError(
-                f"cube radius {radius:.3f} m is outside "
-                f"[{self.minimum_radius:.3f}, {self.maximum_radius:.3f}] m"
+                f"cube x {x:.3f} m is outside "
+                f"[{self.minimum_x:.3f}, {self.maximum_x:.3f}] m"
             )
-        if not self.minimum_theta <= theta <= self.maximum_theta:
+        if not self.minimum_y <= y <= self.maximum_y:
             raise ValueError(
-                f"cube theta {theta:.3f} rad is outside "
-                f"[{self.minimum_theta:.3f}, {self.maximum_theta:.3f}] rad"
+                f"cube y {y:.3f} m is outside "
+                f"[{self.minimum_y:.3f}, {self.maximum_y:.3f}] m"
             )
 
     def inverse_kinematics(self, radius, theta, height, gripper_position):
-        """Return all four commanded joints for a cylindrical tool pose."""
-        effective_radius = radius - float(
-            self.get_parameter("radial_tool_offset").value
-        )
-        effective_height = height - float(
-            self.get_parameter("vertical_tool_offset").value
-        )
-        if effective_radius <= 0.0:
-            raise ValueError("radial_tool_offset leaves a non-positive wrist radius")
-
-        upperarm, lowerarm = solve_planar_ik(
-            effective_radius,
-            effective_height,
+        """Return all four commanded joints for a cylindrical TCP pose."""
+        upperarm, lowerarm = solve_tcp_planar_ik(
+            radius,
+            height,
             float(self.get_parameter("shoulder_height").value),
             float(self.get_parameter("upperarm_length").value),
             float(self.get_parameter("lowerarm_length").value),
+            float(self.get_parameter("radial_tool_offset").value),
+            float(self.get_parameter("vertical_tool_offset").value),
             bool(self.get_parameter("elbow_up").value),
+            float(self.get_parameter("tool_pitch_offset").value),
         )
         joints = [
             float(self.get_parameter("shoulder_sign").value) * theta
@@ -263,16 +279,14 @@ class Task2Node(Node):
     def build_pick_and_place_waypoints(self, cube_pose):
         """Build the Task-1-style approach, grasp, lift, place, and home sequence."""
         cube_radius, cube_theta, cube_z = cube_pose
-        target_radius = self.target_radius
-        target_theta = self.target_theta
+        target_radius = math.hypot(self.target_x, self.target_y)
+        target_theta = math.atan2(self.target_y, self.target_x)
         open_gripper = float(self.get_parameter("gripper_open_position").value)
         closed_gripper = float(self.get_parameter("gripper_closed_position").value)
-        # Input z is the cube center. The controlled point is the end-effector
-        # midpoint, positioned 15 mm above the center of the cube's top face.
-        cube_grasp_z = cube_z + self.cube_height / 2.0 + self.grasp_offset
-        target_grasp_z = (
-            self.target_z + self.cube_height / 2.0 + self.grasp_offset
-        )
+        # Input z is the cube center. The controlled point is the TCP, defined
+        # relative to the cube center with a configurable z offset.
+        cube_grasp_z = cube_z + self.tcp_offset_from_cube_center_z
+        target_grasp_z = self.target_z + self.tcp_offset_from_cube_center_z
         cube_approach_z = cube_grasp_z + self.approach_height
         target_approach_z = target_grasp_z + self.approach_height
 
