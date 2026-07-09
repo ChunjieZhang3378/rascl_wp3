@@ -20,15 +20,15 @@ wp3_tsk2:
     maximum_y: 0.25
 
     # Fixed target position: x=250 mm, y=30 mm.
-    target_x: 0.25
+    target_x: 0.2
     target_y: 0.03
     # Fixed target cube-center height. For a 41 mm cube on the plate, the
     # center is 20.5 mm above base_link z=0.
-    target_z: 0.0205
+    target_z: 0.041
     cube_height: 0.041
     # TCP target relative to the cube center. Zero means the TCP should go to
     # the cube center itself.
-    tcp_offset_from_cube_center_z: 0.01
+    tcp_offset_from_cube_center_z: 0.005
     approach_height: 0.08
 
     # Dimensions
@@ -36,12 +36,12 @@ wp3_tsk2:
     shoulder_height: 0.123001
     # Planar axis distances: hypot(170, 80) mm and 129.09 mm.
     upperarm_length: 0.1878829423
-    lowerarm_length: 0.12909
+    lowerarm_length: 0.12409
 
     # TCP at the center of the gripper: 30 mm below the end-effector midpoint
     # along the tool's local vertical axis. The offset rotates with the tool.
     radial_tool_offset: 0.0
-    vertical_tool_offset: -0.045
+    vertical_tool_offset: -0.035
     tool_pitch_offset: 0.0
     # This branch matches the arm's folded mechanical-zero configuration.
     elbow_up: True
