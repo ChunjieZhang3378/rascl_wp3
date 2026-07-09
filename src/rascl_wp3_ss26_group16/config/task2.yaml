@@ -20,7 +20,7 @@ wp3_tsk2:
     maximum_y: 0.25
 
     # Fixed target position: x=250 mm, y=30 mm.
-    target_x: 0.2
+    target_x: 0.25
     target_y: 0.03
     # Fixed target cube-center height. For a 41 mm cube on the plate, the
     # center is 20.5 mm above base_link z=0.
