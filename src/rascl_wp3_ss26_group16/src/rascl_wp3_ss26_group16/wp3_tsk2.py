@@ -1,9 +1,13 @@
 """Online Cartesian cube-pose pick-and-place planning for Task 2."""
 
 import math
+import site
+import sys
 import time
 from collections import deque
+from pathlib import Path
 
+from ament_index_python.packages import get_package_share_directory
 from control_msgs.action import FollowJointTrajectory
 from geometry_msgs.msg import Point
 import rclpy
@@ -70,7 +74,8 @@ def solve_tcp_planar_ik(
     tool_vertical_offset,
     elbow_up=False,
     tool_pitch_offset=0.0,
-    iterations=3,
+    iterations=20,
+    tolerance=1e-6,
 ):
     """Solve IK for a TCP offset expressed in the local tool frame."""
     wrist_radius = tcp_radius
@@ -96,12 +101,109 @@ def solve_tcp_planar_ik(
             tool_forward_offset * math.sin(tool_pitch)
             + tool_vertical_offset * math.cos(tool_pitch)
         )
-        wrist_radius = tcp_radius - radial_offset
-        wrist_height = tcp_height - vertical_offset
-        if wrist_radius <= 0.0:
+        next_wrist_radius = tcp_radius - radial_offset
+        next_wrist_height = tcp_height - vertical_offset
+        if next_wrist_radius <= 0.0:
             raise ValueError("tool offset places the wrist behind the robot base")
+        if math.hypot(
+            next_wrist_radius - wrist_radius,
+            next_wrist_height - wrist_height,
+        ) <= tolerance:
+            return upperarm, lowerarm
+        wrist_radius = next_wrist_radius
+        wrist_height = next_wrist_height
 
-    return upperarm, lowerarm
+    raise ValueError(
+        f"TCP IK did not converge for r={tcp_radius:.3f}, z={tcp_height:.3f}"
+    )
+
+
+def end_effector_pose_for_tcp(tcp_pose, tool_to_tcp):
+    """Convert a desired TCP pose into the required end-effector-link pose."""
+    return tcp_pose * tool_to_tcp.inv()
+
+
+def solve_robotics_toolbox_tcp_ik(
+    robot,
+    tcp_pose,
+    tool_to_tcp,
+    spatialmath,
+    q0=None,
+    iterations=20,
+    tolerance=1e-4,
+):
+    """Solve position-only Robotics Toolbox IK for a TCP offset."""
+    end_effector_target = end_effector_pose_for_tcp(tcp_pose, tool_to_tcp)
+    seed_candidates = []
+    if q0 is not None:
+        seed_candidates.append(list(q0))
+    seed_candidates.append([0.0] * robot.n)
+    for partial_seed in ([0.0, -0.8, -0.2, 0.0], [0.0, -1.0, -0.2, 0.0]):
+        seed_candidates.append(
+            list(partial_seed[: robot.n]) + [0.0] * max(0, robot.n - len(partial_seed))
+        )
+    last_solution = None
+    last_error = None
+    best_error_norm = float("inf")
+    best_tcp_pose = None
+
+    for initial_seed in seed_candidates:
+        seed = initial_seed
+        target_for_seed = end_effector_target
+        for _ in range(iterations):
+            solution = robot.ikine_LM(
+                target_for_seed,
+                q0=seed,
+                mask=[1, 1, 1, 0, 0, 0],
+            )
+            if not solution.success:
+                last_error = getattr(solution, "reason", "unknown reason")
+                break
+
+            actual_tcp_pose = robot.fkine(solution.q) * tool_to_tcp
+            position_error = tcp_pose.t - actual_tcp_pose.t
+            error_norm = math.sqrt(sum(float(value) ** 2 for value in position_error))
+            if error_norm < best_error_norm:
+                best_error_norm = error_norm
+                best_tcp_pose = actual_tcp_pose
+            if error_norm <= tolerance:
+                return list(solution.q)
+
+            corrected_target = target_for_seed.t + position_error
+            target_for_seed = spatialmath.SE3(
+                float(corrected_target[0]),
+                float(corrected_target[1]),
+                float(corrected_target[2]),
+            )
+            seed = solution.q
+            last_solution = solution
+
+    requested = [round(float(value), 4) for value in tcp_pose.t]
+    if last_solution is None:
+        raise ValueError(
+            "Robotics Toolbox IK failed for TCP "
+            f"{requested}; last error: {last_error}"
+        )
+    actual = (
+        [round(float(value), 4) for value in best_tcp_pose.t]
+        if best_tcp_pose is not None
+        else None
+    )
+    raise ValueError(
+        "Robotics Toolbox TCP IK did not converge for TCP "
+        f"{requested}; best actual TCP {actual}; "
+        f"best error {best_error_norm * 1000.0:.2f} mm"
+    )
+
+
+def add_robotics_toolbox_site_packages():
+    """Expose the container venv packages to ROS entry points using system Python."""
+    venv_site_packages = Path(
+        f"/opt/rascl_venv/lib/python{sys.version_info.major}."
+        f"{sys.version_info.minor}/site-packages"
+    )
+    if venv_site_packages.exists():
+        site.addsitedir(str(venv_site_packages))
 
 
 class Task2Node(Node):
@@ -143,6 +245,10 @@ class Task2Node(Node):
         self.declare_parameter("lowerarm_sign", -1.0)
         self.declare_parameter("lowerarm_offset", -1.1169401780)
         self.declare_parameter("elbow_up", True)
+        self.declare_parameter("ik_backend", "analytical")
+        self.declare_parameter("robotics_toolbox_tcp_offset", [0.0, 0.04, 0.0])
+        self.declare_parameter("robotics_toolbox_theta_offset", -1.570796327)
+        self.declare_parameter("robotics_toolbox_gripper_seed_position", 0.0)
         self.declare_parameter("gripper_open_position", 0.0)
         self.declare_parameter("gripper_closed_position", 2.5)
         self.declare_parameter("home_positions", [0.0, 0.0, 0.0, 0.0])
@@ -166,11 +272,26 @@ class Task2Node(Node):
         )
         self.approach_height = float(self.get_parameter("approach_height").value)
         self.simulate_only = bool(self.get_parameter("simulate_only").value)
+        self.ik_backend = str(self.get_parameter("ik_backend").value)
+        self.robotics_toolbox_gripper_seed_position = float(
+            self.get_parameter("robotics_toolbox_gripper_seed_position").value
+        )
+        self.robotics_toolbox_tcp_offset = [
+            float(value)
+            for value in self.get_parameter("robotics_toolbox_tcp_offset").value
+        ]
+        self.robotics_toolbox_theta_offset = float(
+            self.get_parameter("robotics_toolbox_theta_offset").value
+        )
         self.home_positions = [
             float(value) for value in self.get_parameter("home_positions").value
         ]
         if len(self.home_positions) != len(JOINT_NAMES):
             raise ValueError("home_positions must contain four joint positions")
+        if self.ik_backend not in ("analytical", "robotics_toolbox"):
+            raise ValueError("ik_backend must be 'analytical' or 'robotics_toolbox'")
+        if len(self.robotics_toolbox_tcp_offset) != 3:
+            raise ValueError("robotics_toolbox_tcp_offset must contain three values")
         if self.sample_period <= 0.0 or self.segment_duration <= 0.0:
             raise ValueError("sample_period and segment_duration must be positive")
         if self.cube_height <= 0.0:
@@ -182,6 +303,13 @@ class Task2Node(Node):
 
         self.pending_cubes = deque()
         self.current_positions = None
+        self.robotics_toolbox_robot = None
+        self.robotics_toolbox_spatialmath = None
+        self.robotics_toolbox_tool_to_tcp = None
+        self.robotics_toolbox_seed = None
+        if self.ik_backend == "robotics_toolbox":
+            self._configure_robotics_toolbox_ik()
+
         self.goal_pose_publisher = self.create_publisher(
             Point, str(self.get_parameter("goal_pose_topic").value), 10
         )
@@ -239,6 +367,34 @@ class Task2Node(Node):
                 float(positions_by_name[name]) for name in JOINT_NAMES
             ]
 
+    def _configure_robotics_toolbox_ik(self):
+        """Load Robotics Toolbox and the project URDF for optional IK."""
+        add_robotics_toolbox_site_packages()
+        try:
+            import roboticstoolbox as rtb
+            import spatialmath
+        except ImportError as error:
+            raise ValueError(
+                "ik_backend is 'robotics_toolbox', but roboticstoolbox-python "
+                "or spatialmath-python is not installed"
+            ) from error
+
+        urdf_path = (
+            get_package_share_directory("rascl_description") + "/urdf/rascl.urdf"
+        )
+        self.robotics_toolbox_robot = rtb.ERobot.URDF(urdf_path)
+        if self.robotics_toolbox_robot.n < len(JOINT_NAMES):
+            raise ValueError("Robotics Toolbox URDF has fewer joints than Task 2")
+        self.robotics_toolbox_spatialmath = spatialmath
+        self.robotics_toolbox_tool_to_tcp = spatialmath.SE3(
+            self.robotics_toolbox_tcp_offset[0],
+            self.robotics_toolbox_tcp_offset[1],
+            self.robotics_toolbox_tcp_offset[2],
+        )
+        self.robotics_toolbox_seed = list(self.home_positions)
+        self.robotics_toolbox_seed[3] = self.robotics_toolbox_gripper_seed_position
+        self.get_logger().info("Task 2 using Robotics Toolbox IK backend")
+
     def validate_cube_pose(self, x, y):
         """Reject Cartesian cube positions outside the configured x/y bounds."""
         if not self.minimum_x <= x <= self.maximum_x:
@@ -254,6 +410,11 @@ class Task2Node(Node):
 
     def inverse_kinematics(self, radius, theta, height, gripper_position):
         """Return all four commanded joints for a cylindrical TCP pose."""
+        if self.ik_backend == "robotics_toolbox":
+            return self.robotics_toolbox_inverse_kinematics(
+                radius, theta, height, gripper_position
+            )
+
         upperarm, lowerarm = solve_tcp_planar_ik(
             radius,
             height,
@@ -282,8 +443,48 @@ class Task2Node(Node):
                 )
         return joints
 
+    def robotics_toolbox_inverse_kinematics(
+        self, radius, theta, height, gripper_position
+    ):
+        """Return joint commands from Robotics Toolbox for a cylindrical TCP pose."""
+        # Task 2 Cartesian input uses the calibrated robot/task frame. The URDF
+        # model used by Robotics Toolbox has its zero shoulder direction rotated
+        # by 90 degrees, so convert the target angle before solving IK.
+        toolbox_theta = theta + self.robotics_toolbox_theta_offset
+        x = radius * math.cos(toolbox_theta)
+        y = radius * math.sin(toolbox_theta)
+        target = self.robotics_toolbox_spatialmath.SE3(x, y, height)
+        seed = list(self.robotics_toolbox_seed)
+        seed[3] = self.robotics_toolbox_gripper_seed_position
+        joints = solve_robotics_toolbox_tcp_ik(
+            self.robotics_toolbox_robot,
+            target,
+            self.robotics_toolbox_tool_to_tcp,
+            self.robotics_toolbox_spatialmath,
+            q0=seed,
+        )
+        joints = [float(value) for value in joints[: len(JOINT_NAMES)]]
+        joints[3] = gripper_position
+        for index, joint in enumerate(joints[:3]):
+            if not -math.pi / 2.0 <= joint <= math.pi / 2.0:
+                raise ValueError(
+                    f"Robotics Toolbox IK solution for {JOINT_NAMES[index]} "
+                    f"({joint:.3f} rad) exceeds the URDF joint limits"
+                )
+        self.robotics_toolbox_seed = list(joints)
+        self.robotics_toolbox_seed[3] = self.robotics_toolbox_gripper_seed_position
+        return joints
+
     def build_pick_and_place_waypoints(self, cube_pose):
         """Build the Task-1-style approach, grasp, lift, place, and home sequence."""
+        if self.ik_backend == "robotics_toolbox":
+            self.robotics_toolbox_seed = (
+                list(self.current_positions)
+                if self.current_positions is not None
+                else list(self.home_positions)
+            )
+            self.robotics_toolbox_seed[3] = self.robotics_toolbox_gripper_seed_position
+
         cube_radius, cube_theta, cube_z = cube_pose
         target_radius = math.hypot(self.target_x, self.target_y)
         target_theta = math.atan2(self.target_y, self.target_x)
