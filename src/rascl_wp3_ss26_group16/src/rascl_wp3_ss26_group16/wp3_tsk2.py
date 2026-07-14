@@ -123,7 +123,10 @@ class Task2Node(Node):
         self.declare_parameter("maximum_y", 0.25)
         self.declare_parameter("target_x", 0.25)
         self.declare_parameter("target_y", 0.03)
-        self.declare_parameter("target_z", 0.0205)
+        self.declare_parameter("target_z", 0.03)
+        self.declare_parameter("pre_place_x", 0.26)
+        self.declare_parameter("pre_place_y", 0.03)
+        self.declare_parameter("pre_place_z", 0.05)
         self.declare_parameter("cube_height", 0.041)
         self.declare_parameter("tcp_offset_from_cube_center_z", 0.0)
         self.declare_parameter("approach_height", 0.08)
@@ -154,6 +157,9 @@ class Task2Node(Node):
         self.target_x = float(self.get_parameter("target_x").value)
         self.target_y = float(self.get_parameter("target_y").value)
         self.target_z = float(self.get_parameter("target_z").value)
+        self.pre_place_x = float(self.get_parameter("pre_place_x").value)
+        self.pre_place_y = float(self.get_parameter("pre_place_y").value)
+        self.pre_place_z = float(self.get_parameter("pre_place_z").value)
         self.cube_height = float(self.get_parameter("cube_height").value)
         self.tcp_offset_from_cube_center_z = float(
             self.get_parameter("tcp_offset_from_cube_center_z").value
@@ -281,14 +287,16 @@ class Task2Node(Node):
         cube_radius, cube_theta, cube_z = cube_pose
         target_radius = math.hypot(self.target_x, self.target_y)
         target_theta = math.atan2(self.target_y, self.target_x)
+        pre_place_radius = math.hypot(self.pre_place_x, self.pre_place_y)
+        pre_place_theta = math.atan2(self.pre_place_y, self.pre_place_x)
         open_gripper = float(self.get_parameter("gripper_open_position").value)
         closed_gripper = float(self.get_parameter("gripper_closed_position").value)
         # Input z is the cube center. The controlled point is the TCP, defined
-        # relative to the cube center with a configurable z offset.
+        # relative to the cube center with a configurable z offset. The fixed
+        # placement and pre-place coordinates are already TCP coordinates.
         cube_grasp_z = cube_z + self.tcp_offset_from_cube_center_z
-        target_grasp_z = self.target_z + self.tcp_offset_from_cube_center_z
+        target_grasp_z = self.target_z
         cube_approach_z = cube_grasp_z + self.approach_height
-        target_approach_z = target_grasp_z + self.approach_height
 
         cube_approach_open = self.inverse_kinematics(
             cube_radius, cube_theta, cube_approach_z, open_gripper
@@ -302,8 +310,8 @@ class Task2Node(Node):
         cube_approach_closed = self.inverse_kinematics(
             cube_radius, cube_theta, cube_approach_z, closed_gripper
         )
-        target_approach_closed = self.inverse_kinematics(
-            target_radius, target_theta, target_approach_z, closed_gripper
+        pre_place_closed = self.inverse_kinematics(
+            pre_place_radius, pre_place_theta, self.pre_place_z, closed_gripper
         )
         target_grasp_closed = self.inverse_kinematics(
             target_radius, target_theta, target_grasp_z, closed_gripper
@@ -311,8 +319,8 @@ class Task2Node(Node):
         target_grasp_open = self.inverse_kinematics(
             target_radius, target_theta, target_grasp_z, open_gripper
         )
-        target_approach_open = self.inverse_kinematics(
-            target_radius, target_theta, target_approach_z, open_gripper
+        pre_place_open = self.inverse_kinematics(
+            pre_place_radius, pre_place_theta, self.pre_place_z, open_gripper
         )
 
         # Fold the upper and lower arm before rotating the shoulder. Keep the
@@ -324,7 +332,7 @@ class Task2Node(Node):
             closed_gripper,
         ]
         folded_at_target = [
-            target_approach_closed[0],
+            pre_place_closed[0],
             self.home_positions[1],
             self.home_positions[2],
             closed_gripper,
@@ -338,10 +346,10 @@ class Task2Node(Node):
             cube_approach_closed,
             folded_at_cube,
             folded_at_target,
-            target_approach_closed,
+            pre_place_closed,
             target_grasp_closed,
             target_grasp_open,
-            target_approach_open,
+            pre_place_open,
             self.home_positions,
         ]
 
