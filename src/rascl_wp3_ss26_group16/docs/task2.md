@@ -18,10 +18,10 @@ online minimum-jerk segments for this sequence:
 5. lift
 6. return upper-arm and lower-arm joints to their initial positions
 7. rotate only the shoulder joint to the fixed goal angle
-8. extend above the known target
-9. lower to target
+8. extend to the configured pre-place TCP pose
+9. slide to the configured placement TCP pose
 10. open gripper
-11. retreat
+11. retreat to the pre-place TCP pose
 12. home
 
 During steps 6 and 7, the gripper remains closed. While folding, the shoulder
@@ -29,8 +29,9 @@ stays at the cube angle. Shoulder rotation starts only after the upper-arm and
 lower-arm joints have reached their configured home positions.
 
 The fourth joint uses the same open/closed values as Task 1. Robot dimensions,
-joint signs/offsets, target position, feasible radii, approach height, and gripper
-values are calibration parameters in `config/task2.yaml`.
+joint signs/offsets, target TCP position, pre-place TCP position, feasible
+radii, approach height, and gripper values are calibration parameters in
+`config/task2.yaml`.
 
 The cube may arrive anywhere inside the feasible radial and angular region. The
 goal is fixed and known: it uses the configured target radius and right-side
@@ -39,12 +40,12 @@ angle:
 ```text
 cube:   (cube_radius, cube_theta, cube_z)
 target: (target_radius, target_theta, target_z)
+pre-place: (pre_place_radius, pre_place_theta, pre_place_z)
 ```
 
-The current configuration uses `target_radius=0.19 m` and
-`target_theta=-1.5 rad`. Because the URDF shoulder axis has the opposite sign,
-this produces a shoulder command of `+1.5 rad`, matching the right-side goal
-used by Task 1 while retaining margin from the `+π/2` joint limit.
+The current configuration uses a placement TCP target of
+`(0.25, 0.03, 0.03) m` and a pre-place TCP target of
+`(0.26, 0.03, 0.05) m`.
 
 ## Confirmed dimensions
 
