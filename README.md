@@ -260,5 +260,5 @@ ros2 topic pub --once /cube_pose_cylindrical geometry_msgs/msg/Point \
 or publish cube position in x,y,z
 ```bash
 ros2 topic pub --once /goal_poses geometry_msgs/msg/Point \
-  "{x: 0.15, y: 0.15, z: 0.03}"
+  "{x: 0.04, y: 0.18, z: 0.03}"
 ```
