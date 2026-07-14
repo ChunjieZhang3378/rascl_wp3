@@ -19,15 +19,19 @@ wp3_tsk2:
     minimum_y: 0.03
     maximum_y: 0.25
 
-    # Fixed target position: x=250 mm, y=30 mm.
+    # Fixed placement TCP position: x=250 mm, y=30 mm, z=30 mm.
     target_x: 0.25
     target_y: 0.03
-    # Fixed target cube-center height. For a 41 mm cube on the plate, the
-    # center is 20.5 mm above base_link z=0.
-    target_z: 0.041
+    target_z: 0.03
+    # Closed-gripper TCP waypoint before placement. The robot moves here first,
+    # then slides to the fixed placement TCP position before opening.
+    pre_place_x: 0.27
+    pre_place_y: 0.03
+    pre_place_z: 0.05
     cube_height: 0.041
-    # TCP target relative to the cube center. Zero means the TCP should go to
-    # the cube center itself.
+    # TCP grasp target relative to the incoming cube center. Zero means the TCP
+    # should go to the cube center itself. Fixed placement coordinates above are
+    # already TCP coordinates and do not use this offset.
     tcp_offset_from_cube_center_z: 0.005
     approach_height: 0.08
 
