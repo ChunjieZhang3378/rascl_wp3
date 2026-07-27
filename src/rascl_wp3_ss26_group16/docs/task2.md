@@ -1,121 +1,87 @@
 # Task 2 — Online motion planning
 
-The node accepts either:
+Task 2 accepts cube centres as Cartesian `geometry_msgs/msg/Point` messages on
+`/goal_poses`. The fields are `x`, `y`, and `z` in metres in the calibrated task
+frame. Accepted messages are republished unchanged on `/goal_pose`, converted
+internally to cylindrical coordinates, queued, and processed sequentially.
 
-- Cartesian cube centers on `/goal_poses` as required by the tasksheet.
-- Cylindrical cube centers `(r, theta, z)` on `/cube_pose_cylindrical`, encoded in
-  the `x`, `y`, and `z` fields of `geometry_msgs/msg/Point`.
+The configured Cartesian input bounds are:
 
-Every accepted input is represented internally as `(r, theta, z)` and published
-as Cartesian `(x, y, z)` on `/goal_pose`. The node validates the radius and
-shoulder angle, calculates analytical IK for the three arm joints, then generates
-online minimum-jerk segments for this sequence:
+- `-0.40 <= x <= 0.40 m`
+- `0.03 <= y <= 0.32 m`
 
-1. home/open
-2. approach cube
-3. lower to cube
-4. close gripper
-5. lift
-6. return upper-arm and lower-arm joints to their initial positions
-7. rotate only the shoulder joint to the fixed goal angle
-8. extend to the configured pre-place TCP pose
-9. slide to the configured placement TCP pose
-10. open gripper
-11. retreat to the pre-place TCP pose
-12. home
+All three coordinates must be finite. The `z` coordinate has no separate input
+bound, but every generated TCP waypoint must have a valid IK solution within
+the arm joint limits. A pose can therefore pass the rectangular input check and
+still be rejected during planning.
 
-During steps 6 and 7, the gripper remains closed. While folding, the shoulder
-stays at the cube angle. Shoulder rotation starts only after the upper-arm and
-lower-arm joints have reached their configured home positions.
-
-The fourth joint uses the same open/closed values as Task 1. Robot dimensions,
-joint signs/offsets, target TCP position, pre-place TCP position, feasible
-radii, approach height, and gripper values are calibration parameters in
-`config/task2.yaml`.
-
-The cube may arrive anywhere inside the feasible radial and angular region. The
-goal is fixed and known: it uses the configured target radius and right-side
-angle:
-
-```text
-cube:   (cube_radius, cube_theta, cube_z)
-target: (target_radius, target_theta, target_z)
-pre-place: (pre_place_radius, pre_place_theta, pre_place_z)
-```
-
-The current configuration uses a placement TCP target of
-`(0.25, 0.03, 0.03) m` and a pre-place TCP target of
-`(0.26, 0.03, 0.05) m`.
-
-## Confirmed dimensions
-
-The supplied `BoxDimensions.pdf`, `urdfCreation.pdf`, and `rascl.urdf` give:
-
-- cube footprint: 40 mm × 40 mm
-- cube height: 41 mm
-- cube center above the plate: 20.5 mm
-- grasping end-effector midpoint:
-  15 mm vertically above the center of the cube's top surface
-- shoulder pitch-axis height: 57.441 mm + 65.560 mm = 123.001 mm
-- shoulder-to-elbow planar distance:
-  `sqrt(170² + 80²)` mm = 187.8829423 mm
-- elbow-to-end-effector-axis planar distance: 129.09 mm
-
-The URDF also contains offsets of 11.6 mm, 5.7 mm, 21.83 mm, and 17.9 mm.
-These place the mesh coordinate systems and joint axes in 3D; they are not
-additional planar link lengths.
-
-The URDF mechanical-zero geometry is also included in the joint conversion:
-the upper link starts at `1.1177305070 rad` and the relative elbow angle starts
-at `-1.1169401780 rad`. Therefore, the raw two-link IK angles are converted to
-motor angles before applying the ±π/2 joint-limit checks.
-
-The configured `radial_tool_offset` and `vertical_tool_offset` are zero for the
-tested setup. The configured `target_z=0.0205` assumes that the box-plate
-surface is `z=0` in `base_link`.
-For a cube-center input `cube_z`, the IK grasp height is:
-
-```text
-end_effector_z = cube_z + cube_height / 2 + 0.015
-```
-
-Thus a cube centered 20.5 mm above the plate gives an end-effector midpoint
-height of 56 mm. The analytical IK controls this point only; it does not impose
-an orientation or require the end effector to be parallel to the cube top.
-
-Example cylindrical input:
-
-```bash
-ros2 topic pub --once /cube_pose_cylindrical geometry_msgs/msg/Point \
-  "{x: 0.15, y: 0.75, z: 0.03}"
-```
-
-Example tasksheet-compatible Cartesian input:
+Example input:
 
 ```bash
 ros2 topic pub --once /goal_poses geometry_msgs/msg/Point \
-  "{x: 0.15, y: 0.0, z: 0.03}"
+  "{x: 0.04, y: 0.18, z: 0.03}"
 ```
 
-For cylindrical input, `Point.x=r`, `Point.y=theta`, and `Point.z` is the cube
-centre height. For Cartesian input, the radius is calculated as
-`sqrt(x² + y²)`.
+There is no `/cube_pose_cylindrical` subscription in the current node.
+
+## Motion sequence
+
+For each queued cube, the node generates one continuous joint trajectory whose
+waypoint transitions are minimum-jerk segments:
+
+1. configured home pose
+2. approach the cube with the gripper open
+3. lower to the grasp TCP pose
+4. close the gripper
+5. lift back to the approach pose
+6. fold the upper-arm and lower-arm joints to their home positions while
+   retaining the cube shoulder angle
+7. rotate the folded arm to the shoulder angle of the pre-place waypoint
+8. extend to the pre-place TCP pose with the gripper closed
+9. move to the placement TCP pose
+10. open the gripper
+11. retreat to the pre-place TCP pose with the gripper open
+12. return home
+
+The gripper remains closed while the arm folds, rotates, and moves to the
+placement point. Each waypoint transition takes `4.0 s` by default and is
+sampled every `0.02 s`.
+
+
+## Inverse kinematics
+
+Task 2 uses Robotics Toolbox as its only IK solver. It:
+
+- loads the project robot model from `rascl_description/urdf/rascl.urdf`;
+- solves position-only Levenberg–Marquardt IK;
+- models the TCP as `[0.0, 0.038, 0.0] m` from the URDF end-effector frame;
+- applies a `-pi/2` task-to-URDF angular offset;
+- reuses the previous solution as the next seed and tries fallback seeds; and
+- accepts a TCP position error up to `0.1 mm`.
+
+The first three resulting joints must remain within the URDF limits of
+`[-pi/2, pi/2]`. Robotics Toolbox and SpatialMath are installed in
+`/opt/rascl_venv` by the project Dockerfile; the node adds that environment's
+site-packages when necessary.
 
 ## RViz simulation
+
+Build and source the workspace, then run:
 
 ```bash
 ros2 launch rascl_wp3_ss26_group16 wp3_tsk2_sim.launch.py
 ```
 
-Then publish one valid cube center, for example:
+In another sourced terminal, publish a cube centre:
 
 ```bash
-ros2 topic pub --once /cube_pose_cylindrical geometry_msgs/msg/Point \
-  "{x: 0.15, y: 0.75, z: 0.03}"
+ros2 topic pub --once /goal_poses geometry_msgs/msg/Point \
+  "{x: 0.04, y: 0.18, z: 0.03}"
 ```
 
-The simulation publishes `/joint_states` for `robot_state_publisher` and replays
-each minimum-jerk segment in real time.
+The simulation publishes `/joint_states` for `robot_state_publisher` and
+replays the generated trajectory in real time. The node remains active for
+additional cube messages.
 
 ## Real robot
 
@@ -126,25 +92,24 @@ ldconfig
 ros2 launch rascl_description ros2_control.launch.py
 ```
 
-In another sourced terminal, confirm that `joint_trajectory_controller` is
-active, then launch Task 2:
+In another sourced terminal, confirm that the trajectory controller is active
+and then start Task 2:
 
 ```bash
 ros2 control list_controllers
 ros2 launch rascl_wp3_ss26_group16 wp3_tsk2.launch.py
 ```
 
-Publish one cube centre at a time from a third sourced terminal. Valid messages
-are queued and executed sequentially. The current minimum-jerk segment duration
-is `4.0 s`.
+Publish one Cartesian cube centre at a time from a third sourced terminal:
 
 ```bash
-ros2 topic pub --once /cube_pose_cylindrical geometry_msgs/msg/Point \
-  "{x: 0.13, y: 0.0, z: 0.03}"
-
-ros2 topic pub --once /cube_pose_cylindrical geometry_msgs/msg/Point \
-  "{x: 0.15, y: 0.78, z: 0.03}"
-
-ros2 topic pub --once /cube_pose_cylindrical geometry_msgs/msg/Point \
-  "{x: 0.21, y: -0.4, z: 0.03}"
+ros2 topic pub --once /goal_poses geometry_msgs/msg/Point \
+  "{x: 0.04, y: 0.18, z: 0.03}"
 ```
+
+On real hardware, planning waits until a complete `/joint_states` message has
+provided all four configured joints. The generated trajectory is sent to
+`/joint_trajectory_controller/follow_joint_trajectory`.
+
+All topics, limits, geometry, IK settings, TCP targets, gripper positions, and
+timing values described above are parameters in `config/task2.yaml`.

@@ -13,13 +13,13 @@ wp3_tsk2:
     simulate_only: false
 
     # Feasible Cartesian cube-position limits (metres).
-    # x: -250 to 250 mm; y: 30 to 250 mm.
+    # x: -400 to 400 mm; y: 30 to 320 mm.
     minimum_x: -0.40
     maximum_x: 0.40
     minimum_y: 0.03
     maximum_y: 0.32
 
-    # Fixed placement TCP position: x=250 mm, y=30 mm, z=30 mm.
+    # Fixed placement TCP position: x=165 mm, y=50 mm, z=38 mm.
     target_x: 0.165
     target_y: 0.05
     target_z: 0.038
@@ -28,46 +28,17 @@ wp3_tsk2:
     pre_place_x: 0.215
     pre_place_y: 0.05
     pre_place_z: 0.045
-    cube_height: 0.041
-    # TCP grasp target relative to the incoming cube center. Zero means the TCP
-    # should go to the cube center itself. Fixed placement coordinates above are
-    # already TCP coordinates and do not use this offset.
+    # TCP grasp target relative to the incoming cube center. Fixed placement
+    # coordinates above are already TCP coordinates and do not use this offset.
     tcp_offset_from_cube_center_z: 0.007
     approach_height: 0.08
 
-    # Dimensions
-    # Shoulder pitch axis: 57.441 mm + 65.560 mm above base_link.
-    shoulder_height: 0.123001
-    # Planar axis distances: hypot(170, 80) mm and 129.09 mm.
-    upperarm_length: 0.1878829423
-    lowerarm_length: 0.12909
-
-    # TCP at the center of the gripper: 30 mm below the end-effector midpoint
-    # along the tool's local vertical axis. The offset rotates with the tool.
-    radial_tool_offset: 0.0
-    vertical_tool_offset: 0.0
-    tool_pitch_offset: 0.0
-    # This branch matches the arm's folded mechanical-zero configuration.
-    elbow_up: True
-    # Use "analytical" for the built-in two-link solver or "robotics_toolbox"
-    # for the URDF-based Robotics Toolbox solver.
-    ik_backend: "robotics_toolbox"
+    # URDF-based Robotics Toolbox IK configuration.
     robotics_toolbox_tcp_offset: [0.0, 0.038, 0.0]
     # Convert Task 2 x/y targets into the URDF frame used by Robotics Toolbox.
     # -pi/2 maps task (x, y) to toolbox (y, -x).
     robotics_toolbox_theta_offset: -1.570796327
     robotics_toolbox_gripper_seed_position: 0.0
-
-    # Joint-coordinate mapping for the current URDF axis conventions.
-    shoulder_sign: -1.0
-    # The arm's zero direction is +y; offset by 90 degrees to use base_link x/y.
-    shoulder_offset: 1.570796327
-    upperarm_sign: 1.0
-    # At motor zero, the upper link is 1.11773 rad above the radial plane.
-    upperarm_offset: -1.1177305070
-    lowerarm_sign: -1.0
-    # Relative geometric elbow angle at motor zero is -1.11694 rad.
-    lowerarm_offset: -1.1169401780
 
     # Same end-effector commands currently used by Task 1.
     gripper_open_position: 0.0

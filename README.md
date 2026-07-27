@@ -229,7 +229,8 @@ rossetup
 ros2 launch rascl_wp3_ss26_group16 wp3_tsk1.launch.py
 ```
 
-For task 2, place the cubes anywhere whitn the feasible raadius range (0.11cm, 0.19cm)
+For Task 2, place the cube inside the configured Cartesian input region:
+`x=-0.40–0.40 m` and `y=0.03–0.32 m`. The full motion must also be reachable.
 In terminal 2:
 Open container and launch task 2 in real
 ```bash
@@ -246,18 +247,8 @@ rossetup
 ```
 
 
-Publish cube position in cylindrical
-x: radius of the cube position. Possible positions are: {0.11, 0.15, 0.19}
-y: angel
-z: height
-```bash
-ros2 topic pub --once /cube_pose_cylindrical geometry_msgs/msg/Point \
-  "{x: 0.15, y: 0.75, z: 0.03}"
-```
+Publish the cube centre in Cartesian `x`, `y`, and `z` coordinates (metres):
 
-
-
-or publish cube position in x,y,z
 ```bash
 ros2 topic pub --once /goal_poses geometry_msgs/msg/Point \
   "{x: 0.04, y: 0.18, z: 0.03}"

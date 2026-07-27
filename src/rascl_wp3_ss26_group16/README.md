@@ -21,13 +21,6 @@ rosbuild
 rossetup
 ```
 
-For a standard ROS 2 build, the equivalent is:
-
-```bash
-colcon build --packages-select rascl_wp3_ss26_group16 --symlink-install
-source install/setup.bash
-```
-
 ## Simulation
 
 Allow container GUI windows on the host:
@@ -43,28 +36,16 @@ ros2 launch rascl_wp3_ss26_group16 wp3_tsk1_sim.launch.py
 ros2 launch rascl_wp3_ss26_group16 wp3_tsk2_sim.launch.py
 ```
 
-Task 2 remains active and waits for cube positions. Example cylindrical input:
-
-```bash
-ros2 topic pub --once /cube_pose_cylindrical geometry_msgs/msg/Point \
-  "{x: 0.15, y: 0.75, z: 0.03}"
-```
-
-For this convenience topic, the `Point` fields mean:
-
-- `x`: radius `r` in metres
-- `y`: angle `theta` in radians
-- `z`: cube-center height in metres
-
-The tasksheet-compatible Cartesian input is:
+Task 2 remains active and waits for Cartesian cube-centre positions:
 
 ```bash
 ros2 topic pub --once /goal_poses geometry_msgs/msg/Point \
-  "{x: 0.15, y: 0.0, z: 0.03}"
+  "{x: 0.04, y: 0.18, z: 0.03}"
 ```
 
-For `/goal_poses`, the fields are ordinary Cartesian `x`, `y`, and `z` values.
-The Cartesian radius `sqrt(x² + y²)` must be between `0.13 m` and `0.21 m`.
+The fields are Cartesian `x`, `y`, and `z` values in metres. The current input
+bounds are `x=-0.40–0.40 m` and `y=0.03–0.32 m`; IK and joint-limit checks may
+reject points inside that rectangle if the complete motion is unreachable.
 
 ## Real robot
 
@@ -100,14 +81,3 @@ ros2 launch rascl_wp3_ss26_group16 wp3_tsk2.launch.py
 Publish each Task 2 cube position from a third sourced terminal. The node queues
 valid inputs and processes cubes sequentially.
 
-## Configuration summary
-
-- Task 1 controller mode: CSP
-- Task 1 sample period: `0.02 s`
-- Task 2 feasible radius: `0.13–0.21 m`
-- Task 2 feasible angle: `-pi/2–pi/2 rad`
-- Task 2 fixed goal: `r=0.19 m`, `theta=-1.5 rad`
-- Task 2 minimum-jerk segment duration: `4.0 s`
-
-See [docs/task1.md](docs/task1.md), [docs/task2.md](docs/task2.md), and
-[docs/cube_placement.md](docs/cube_placement.md) for details.

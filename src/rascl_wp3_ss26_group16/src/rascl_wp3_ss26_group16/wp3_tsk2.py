@@ -19,103 +19,9 @@ from trajectory_msgs.msg import JointTrajectoryPoint
 from .wp3_tsk1 import JOINT_NAMES, minimum_jerk_segment
 
 
-def cylindrical_to_cartesian(radius, theta, height):
-    """Convert a robot-base cylindrical pose to Cartesian coordinates."""
-    return Point(
-        x=radius * math.cos(theta),
-        y=radius * math.sin(theta),
-        z=height,
-    )
-
-
 def cartesian_to_cylindrical(point):
     """Convert a Cartesian point to (radius, theta, height)."""
     return math.hypot(point.x, point.y), math.atan2(point.y, point.x), point.z
-
-
-def solve_planar_ik(
-    radius,
-    height,
-    shoulder_height,
-    upperarm_length,
-    lowerarm_length,
-    elbow_up=False,
-):
-    """Solve the two-link vertical-plane IK for the arm joints."""
-    radial_distance = radius
-    vertical_distance = height - shoulder_height
-    distance_squared = radial_distance ** 2 + vertical_distance ** 2
-    cosine_lowerarm = (
-        distance_squared - upperarm_length ** 2 - lowerarm_length ** 2
-    ) / (2.0 * upperarm_length * lowerarm_length)
-    if cosine_lowerarm < -1.0 - 1e-9 or cosine_lowerarm > 1.0 + 1e-9:
-        raise ValueError(
-            f"pose r={radius:.3f}, z={height:.3f} is outside the IK workspace"
-        )
-
-    cosine_lowerarm = max(-1.0, min(1.0, cosine_lowerarm))
-    lowerarm = math.acos(cosine_lowerarm)
-    if elbow_up:
-        lowerarm = -lowerarm
-    upperarm = math.atan2(vertical_distance, radial_distance) - math.atan2(
-        lowerarm_length * math.sin(lowerarm),
-        upperarm_length + lowerarm_length * math.cos(lowerarm),
-    )
-    return upperarm, lowerarm
-
-
-def solve_tcp_planar_ik(
-    tcp_radius,
-    tcp_height,
-    shoulder_height,
-    upperarm_length,
-    lowerarm_length,
-    tool_forward_offset,
-    tool_vertical_offset,
-    elbow_up=False,
-    tool_pitch_offset=0.0,
-    iterations=20,
-    tolerance=1e-6,
-):
-    """Solve IK for a TCP offset expressed in the local tool frame."""
-    wrist_radius = tcp_radius
-    wrist_height = tcp_height
-    upperarm = 0.0
-    lowerarm = 0.0
-
-    for _ in range(iterations):
-        upperarm, lowerarm = solve_planar_ik(
-            wrist_radius,
-            wrist_height,
-            shoulder_height,
-            upperarm_length,
-            lowerarm_length,
-            elbow_up,
-        )
-        tool_pitch = upperarm + lowerarm + tool_pitch_offset
-        radial_offset = (
-            tool_forward_offset * math.cos(tool_pitch)
-            - tool_vertical_offset * math.sin(tool_pitch)
-        )
-        vertical_offset = (
-            tool_forward_offset * math.sin(tool_pitch)
-            + tool_vertical_offset * math.cos(tool_pitch)
-        )
-        next_wrist_radius = tcp_radius - radial_offset
-        next_wrist_height = tcp_height - vertical_offset
-        if next_wrist_radius <= 0.0:
-            raise ValueError("tool offset places the wrist behind the robot base")
-        if math.hypot(
-            next_wrist_radius - wrist_radius,
-            next_wrist_height - wrist_height,
-        ) <= tolerance:
-            return upperarm, lowerarm
-        wrist_radius = next_wrist_radius
-        wrist_height = next_wrist_height
-
-    raise ValueError(
-        f"TCP IK did not converge for r={tcp_radius:.3f}, z={tcp_height:.3f}"
-    )
 
 
 def end_effector_pose_for_tcp(tcp_pose, tool_to_tcp):
@@ -229,23 +135,8 @@ class Task2Node(Node):
         self.declare_parameter("pre_place_x", 0.26)
         self.declare_parameter("pre_place_y", 0.03)
         self.declare_parameter("pre_place_z", 0.05)
-        self.declare_parameter("cube_height", 0.041)
         self.declare_parameter("tcp_offset_from_cube_center_z", 0.0)
         self.declare_parameter("approach_height", 0.08)
-        self.declare_parameter("shoulder_height", 0.123001)
-        self.declare_parameter("upperarm_length", 0.1878829423)
-        self.declare_parameter("lowerarm_length", 0.12909)
-        self.declare_parameter("radial_tool_offset", 0.03)
-        self.declare_parameter("vertical_tool_offset", 0.0)
-        self.declare_parameter("tool_pitch_offset", 0.0)
-        self.declare_parameter("shoulder_sign", -1.0)
-        self.declare_parameter("shoulder_offset", 0.0)
-        self.declare_parameter("upperarm_sign", 1.0)
-        self.declare_parameter("upperarm_offset", -1.1177305070)
-        self.declare_parameter("lowerarm_sign", -1.0)
-        self.declare_parameter("lowerarm_offset", -1.1169401780)
-        self.declare_parameter("elbow_up", True)
-        self.declare_parameter("ik_backend", "analytical")
         self.declare_parameter("robotics_toolbox_tcp_offset", [0.0, 0.04, 0.0])
         self.declare_parameter("robotics_toolbox_theta_offset", -1.570796327)
         self.declare_parameter("robotics_toolbox_gripper_seed_position", 0.0)
@@ -266,13 +157,11 @@ class Task2Node(Node):
         self.pre_place_x = float(self.get_parameter("pre_place_x").value)
         self.pre_place_y = float(self.get_parameter("pre_place_y").value)
         self.pre_place_z = float(self.get_parameter("pre_place_z").value)
-        self.cube_height = float(self.get_parameter("cube_height").value)
         self.tcp_offset_from_cube_center_z = float(
             self.get_parameter("tcp_offset_from_cube_center_z").value
         )
         self.approach_height = float(self.get_parameter("approach_height").value)
         self.simulate_only = bool(self.get_parameter("simulate_only").value)
-        self.ik_backend = str(self.get_parameter("ik_backend").value)
         self.robotics_toolbox_gripper_seed_position = float(
             self.get_parameter("robotics_toolbox_gripper_seed_position").value
         )
@@ -288,14 +177,10 @@ class Task2Node(Node):
         ]
         if len(self.home_positions) != len(JOINT_NAMES):
             raise ValueError("home_positions must contain four joint positions")
-        if self.ik_backend not in ("analytical", "robotics_toolbox"):
-            raise ValueError("ik_backend must be 'analytical' or 'robotics_toolbox'")
         if len(self.robotics_toolbox_tcp_offset) != 3:
             raise ValueError("robotics_toolbox_tcp_offset must contain three values")
         if self.sample_period <= 0.0 or self.segment_duration <= 0.0:
             raise ValueError("sample_period and segment_duration must be positive")
-        if self.cube_height <= 0.0:
-            raise ValueError("cube_height must be positive")
         if not self.minimum_x < self.maximum_x:
             raise ValueError("minimum_x must be smaller than maximum_x")
         if not self.minimum_y < self.maximum_y:
@@ -307,8 +192,7 @@ class Task2Node(Node):
         self.robotics_toolbox_spatialmath = None
         self.robotics_toolbox_tool_to_tcp = None
         self.robotics_toolbox_seed = None
-        if self.ik_backend == "robotics_toolbox":
-            self._configure_robotics_toolbox_ik()
+        self._configure_robotics_toolbox_ik()
 
         self.goal_pose_publisher = self.create_publisher(
             Point, str(self.get_parameter("goal_pose_topic").value), 10
@@ -368,15 +252,14 @@ class Task2Node(Node):
             ]
 
     def _configure_robotics_toolbox_ik(self):
-        """Load Robotics Toolbox and the project URDF for optional IK."""
+        """Load Robotics Toolbox and the project URDF."""
         add_robotics_toolbox_site_packages()
         try:
             import roboticstoolbox as rtb
             import spatialmath
         except ImportError as error:
             raise ValueError(
-                "ik_backend is 'robotics_toolbox', but roboticstoolbox-python "
-                "or spatialmath-python is not installed"
+                "roboticstoolbox-python or spatialmath-python is not installed"
             ) from error
 
         urdf_path = (
@@ -409,43 +292,6 @@ class Task2Node(Node):
             )
 
     def inverse_kinematics(self, radius, theta, height, gripper_position):
-        """Return all four commanded joints for a cylindrical TCP pose."""
-        if self.ik_backend == "robotics_toolbox":
-            return self.robotics_toolbox_inverse_kinematics(
-                radius, theta, height, gripper_position
-            )
-
-        upperarm, lowerarm = solve_tcp_planar_ik(
-            radius,
-            height,
-            float(self.get_parameter("shoulder_height").value),
-            float(self.get_parameter("upperarm_length").value),
-            float(self.get_parameter("lowerarm_length").value),
-            float(self.get_parameter("radial_tool_offset").value),
-            float(self.get_parameter("vertical_tool_offset").value),
-            bool(self.get_parameter("elbow_up").value),
-            float(self.get_parameter("tool_pitch_offset").value),
-        )
-        joints = [
-            float(self.get_parameter("shoulder_sign").value) * theta
-            + float(self.get_parameter("shoulder_offset").value),
-            float(self.get_parameter("upperarm_sign").value) * upperarm
-            + float(self.get_parameter("upperarm_offset").value),
-            float(self.get_parameter("lowerarm_sign").value) * lowerarm
-            + float(self.get_parameter("lowerarm_offset").value),
-            gripper_position,
-        ]
-        for index, joint in enumerate(joints[:3]):
-            if not -math.pi / 2.0 <= joint <= math.pi / 2.0:
-                raise ValueError(
-                    f"IK solution for {JOINT_NAMES[index]} ({joint:.3f} rad) "
-                    "exceeds the URDF joint limits"
-                )
-        return joints
-
-    def robotics_toolbox_inverse_kinematics(
-        self, radius, theta, height, gripper_position
-    ):
         """Return joint commands from Robotics Toolbox for a cylindrical TCP pose."""
         # Task 2 Cartesian input uses the calibrated robot/task frame. The URDF
         # model used by Robotics Toolbox has its zero shoulder direction rotated
@@ -477,13 +323,12 @@ class Task2Node(Node):
 
     def build_pick_and_place_waypoints(self, cube_pose):
         """Build the Task-1-style approach, grasp, lift, place, and home sequence."""
-        if self.ik_backend == "robotics_toolbox":
-            self.robotics_toolbox_seed = (
-                list(self.current_positions)
-                if self.current_positions is not None
-                else list(self.home_positions)
-            )
-            self.robotics_toolbox_seed[3] = self.robotics_toolbox_gripper_seed_position
+        self.robotics_toolbox_seed = (
+            list(self.current_positions)
+            if self.current_positions is not None
+            else list(self.home_positions)
+        )
+        self.robotics_toolbox_seed[3] = self.robotics_toolbox_gripper_seed_position
 
         cube_radius, cube_theta, cube_z = cube_pose
         target_radius = math.hypot(self.target_x, self.target_y)
@@ -639,8 +484,8 @@ class Task2Node(Node):
             self.current_positions = list(self.home_positions)
 
         self.get_logger().info(
-            "Ready: publish Cartesian Point(x,y,z) on /goal_poses or "
-            "cylindrical Point(r,theta,z) on /cube_pose_cylindrical"
+            "Ready: publish Cartesian Point(x,y,z) on "
+            f"{self.get_parameter('cartesian_cube_topic').value}"
         )
         while rclpy.ok():
             rclpy.spin_once(self, timeout_sec=0.1)
