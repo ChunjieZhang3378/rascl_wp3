@@ -14,20 +14,20 @@ wp3_tsk2:
 
     # Feasible Cartesian cube-position limits (metres).
     # x: -250 to 250 mm; y: 30 to 250 mm.
-    minimum_x: -0.30
-    maximum_x: 0.30
+    minimum_x: -0.40
+    maximum_x: 0.40
     minimum_y: 0.03
-    maximum_y: 0.30
+    maximum_y: 0.32
 
     # Fixed placement TCP position: x=250 mm, y=30 mm, z=30 mm.
-    target_x: 0.235
-    target_y: 0.03
-    target_z: 0.045
+    target_x: 0.165
+    target_y: 0.05
+    target_z: 0.038
     # Closed-gripper TCP waypoint before placement. The robot moves here first,
     # then slides to the fixed placement TCP position before opening.
-    pre_place_x: 0.265
-    pre_place_y: 0.03
-    pre_place_z: 0.06
+    pre_place_x: 0.215
+    pre_place_y: 0.05
+    pre_place_z: 0.045
     cube_height: 0.041
     # TCP grasp target relative to the incoming cube center. Zero means the TCP
     # should go to the cube center itself. Fixed placement coordinates above are
@@ -52,7 +52,7 @@ wp3_tsk2:
     # Use "analytical" for the built-in two-link solver or "robotics_toolbox"
     # for the URDF-based Robotics Toolbox solver.
     ik_backend: "robotics_toolbox"
-    robotics_toolbox_tcp_offset: [-0.01, 0.03, 0.0]
+    robotics_toolbox_tcp_offset: [0.0, 0.038, 0.0]
     # Convert Task 2 x/y targets into the URDF frame used by Robotics Toolbox.
     # -pi/2 maps task (x, y) to toolbox (y, -x).
     robotics_toolbox_theta_offset: -1.570796327
